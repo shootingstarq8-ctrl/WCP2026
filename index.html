@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>كأس العالم 2026 — مسابقة التوقعات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Cairo','Segoe UI',sans-serif;background:#0a0f1e;}
+  @keyframes float{0%{transform:translateY(0) scale(1);}100%{transform:translateY(-30px) scale(1.1);}}
+  @keyframes spin{100%{transform:rotate(360deg);}}
+  #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0a0f1e,#0d1f3c,#0a1628);color:#00d4ff;flex-direction:column;gap:14px;z-index:9999;text-align:center;padding:20px;}
+  #boot .ball{font-size:54px;animation:spin 1.4s linear infinite;}
+  input,button,textarea{font-family:inherit;}
+</style>
+
+<!-- Firebase config -->
+<script>
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBiX1wTQMxi2zpnBhfy945LrK7TQKVY1V8",
+  authDomain: "wcp2026-732c8.firebaseapp.com",
+  databaseURL: "https://wcp2026-732c8-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "wcp2026-732c8",
+  storageBucket: "wcp2026-732c8.firebasestorage.app",
+  messagingSenderId: "863209864635",
+  appId: "1:863209864635:web:2fb53f36321da4a3add89e"
+};
+</script>
+
+<!-- Libraries (standard load order) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+</head>
+<body>
+<div id="boot"><div class="ball">⚽</div><div>جاري التحميل...</div></div>
+<div id="root"></div>
+
+<script>
+function _nullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return rhsFn(); } } function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }
+
+/* ============================================================
+   STORAGE LAYER — Firebase Realtime Database
+   Same dbGet/dbSet interface as before + live subscriptions.
+   Falls back to localStorage if Firebase isn't configured yet.
+   ============================================================ */
+let FB_DB=null, FB_OK=false;
+try{
+  if(window.FIREBASE_CONFIG && !String(window.FIREBASE_CONFIG.apiKey).startsWith("PASTE_")){
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    FB_DB=firebase.database();
+    FB_OK=true;
+  }
+}catch(e){ console.warn("Firebase init failed, using local fallback:",e); }
+
+function lsGet(key,fallback){try{const v=localStorage.getItem("wc26_"+key);return v?JSON.parse(v):fallback;}catch (e2){return fallback;}}
+function lsSet(key,value){try{localStorage.setItem("wc26_"+key,JSON.stringify(value));}catch (e3){}}
+
+async function dbGet(key,fallback){
+  if(FB_OK){
+    try{
+      const snap=await FB_DB.ref("wc26/"+key).get();
+      return snap.exists()?snap.val():fallback;
+    }catch(e){ return lsGet(key,fallback); }
+  }
+  return lsGet(key,fallback);
+}
+async function dbSet(key,value){
+  if(FB_OK){
+    try{ await FB_DB.ref("wc26/"+key).set(value); return; }catch(e){ /* fall through */ }
+  }
+  lsSet(key,value);
+}
+// Live subscription: calls cb(value) immediately and on every change.
+function dbSubscribe(key,fallback,cb){
+  if(FB_OK){
+    const ref=FB_DB.ref("wc26/"+key);
+    const handler=ref.on("value",snap=>{ cb(snap.exists()?snap.val():fallback); });
+    return ()=>ref.off("value",handler);
+  }else{
+    cb(lsGet(key,fallback));
+    return ()=>{};
+  }
+}
+
+// ===== DATA =====
+const GROUPS = {
+  A:["المكسيك","جنوب أفريقيا","كوريا الجنوبية","التشيك"],
+  B:["كندا","البوسنة","قطر","سويسرا"],
+  C:["البرازيل","المغرب","هايتي","اسكتلندا"],
+  D:["الولايات المتحدة","باراغواي","أستراليا","تركيا"],
+  E:["ألمانيا","كوراساو","ساحل العاج","الإكوادور"],
+  F:["هولندا","اليابان","السويد","تونس"],
+  G:["إسبانيا","الرأس الأخضر","السعودية","أوروغواي"],
+  H:["بلجيكا","مصر","إيران","نيوزيلندا"],
+  I:["فرنسا","السنغال","العراق","النرويج"],
+  J:["الأرجنتين","الجزائر","النمسا","الأردن"],
+  K:["البرتغال","الكونغو","غانا","بنما"],
+  L:["إنجلترا","كرواتيا","أوزبكستان","كولومبيا"],
+};
+
+const SCHEDULE = [
+  {date:"2026-06-11",kickoff:"22:00",group:"A",home:"المكسيك",away:"جنوب أفريقيا",key:"A_المكسيك_جنوب أفريقيا"},
+  {date:"2026-06-12",kickoff:"05:00",group:"A",home:"كوريا الجنوبية",away:"التشيك",key:"A_كوريا الجنوبية_التشيك"},
+  {date:"2026-06-12",kickoff:"22:00",group:"B",home:"كندا",away:"البوسنة",key:"B_كندا_البوسنة"},
+  {date:"2026-06-13",kickoff:"04:00",group:"D",home:"الولايات المتحدة",away:"باراغواي",key:"D_الولايات المتحدة_باراغواي"},
+  {date:"2026-06-13",kickoff:"22:00",group:"B",home:"قطر",away:"سويسرا",key:"B_قطر_سويسرا"},
+  {date:"2026-06-14",kickoff:"01:00",group:"C",home:"البرازيل",away:"المغرب",key:"C_البرازيل_المغرب"},
+  {date:"2026-06-14",kickoff:"04:00",group:"C",home:"هايتي",away:"اسكتلندا",key:"C_هايتي_اسكتلندا"},
+  {date:"2026-06-14",kickoff:"07:00",group:"D",home:"أستراليا",away:"تركيا",key:"D_أستراليا_تركيا"},
+  {date:"2026-06-14",kickoff:"20:00",group:"E",home:"ألمانيا",away:"كوراساو",key:"E_ألمانيا_كوراساو"},
+  {date:"2026-06-14",kickoff:"23:00",group:"F",home:"هولندا",away:"اليابان",key:"F_هولندا_اليابان"},
+  {date:"2026-06-15",kickoff:"02:00",group:"E",home:"ساحل العاج",away:"الإكوادور",key:"E_ساحل العاج_الإكوادور"},
+  {date:"2026-06-15",kickoff:"05:00",group:"F",home:"السويد",away:"تونس",key:"F_السويد_تونس"},
+  {date:"2026-06-15",kickoff:"19:00",group:"G",home:"إسبانيا",away:"الرأس الأخضر",key:"G_إسبانيا_الرأس الأخضر"},
+  {date:"2026-06-15",kickoff:"22:00",group:"H",home:"بلجيكا",away:"مصر",key:"H_بلجيكا_مصر"},
+  {date:"2026-06-16",kickoff:"01:00",group:"G",home:"السعودية",away:"أوروغواي",key:"G_السعودية_أوروغواي"},
+  {date:"2026-06-16",kickoff:"04:00",group:"H",home:"إيران",away:"نيوزيلندا",key:"H_إيران_نيوزيلندا"},
+  {date:"2026-06-16",kickoff:"22:00",group:"I",home:"فرنسا",away:"السنغال",key:"I_فرنسا_السنغال"},
+  {date:"2026-06-17",kickoff:"01:00",group:"I",home:"العراق",away:"النرويج",key:"I_العراق_النرويج"},
+  {date:"2026-06-17",kickoff:"04:00",group:"J",home:"الأرجنتين",away:"الجزائر",key:"J_الأرجنتين_الجزائر"},
+  {date:"2026-06-17",kickoff:"07:00",group:"J",home:"النمسا",away:"الأردن",key:"J_النمسا_الأردن"},
+  {date:"2026-06-17",kickoff:"20:00",group:"K",home:"البرتغال",away:"الكونغو",key:"K_البرتغال_الكونغو"},
+  {date:"2026-06-17",kickoff:"23:00",group:"L",home:"إنجلترا",away:"كرواتيا",key:"L_إنجلترا_كرواتيا"},
+  {date:"2026-06-18",kickoff:"02:00",group:"K",home:"غانا",away:"بنما",key:"K_غانا_بنما"},
+  {date:"2026-06-18",kickoff:"05:00",group:"L",home:"أوزبكستان",away:"كولومبيا",key:"L_أوزبكستان_كولومبيا"},
+  {date:"2026-06-18",kickoff:"19:00",group:"A",home:"التشيك",away:"جنوب أفريقيا",key:"A_التشيك_جنوب أفريقيا"},
+  {date:"2026-06-18",kickoff:"22:00",group:"B",home:"سويسرا",away:"البوسنة",key:"B_سويسرا_البوسنة"},
+  {date:"2026-06-19",kickoff:"01:00",group:"B",home:"كندا",away:"قطر",key:"B_كندا_قطر"},
+  {date:"2026-06-19",kickoff:"04:00",group:"A",home:"المكسيك",away:"كوريا الجنوبية",key:"A_المكسيك_كوريا الجنوبية"},
+  {date:"2026-06-19",kickoff:"22:00",group:"D",home:"الولايات المتحدة",away:"أستراليا",key:"D_الولايات المتحدة_أستراليا"},
+  {date:"2026-06-20",kickoff:"01:00",group:"C",home:"اسكتلندا",away:"المغرب",key:"C_اسكتلندا_المغرب"},
+  {date:"2026-06-20",kickoff:"03:30",group:"C",home:"البرازيل",away:"هايتي",key:"C_البرازيل_هايتي"},
+  {date:"2026-06-20",kickoff:"06:00",group:"D",home:"تركيا",away:"باراغواي",key:"D_تركيا_باراغواي"},
+  {date:"2026-06-20",kickoff:"20:00",group:"F",home:"هولندا",away:"السويد",key:"F_هولندا_السويد"},
+  {date:"2026-06-20",kickoff:"23:00",group:"E",home:"ألمانيا",away:"ساحل العاج",key:"E_ألمانيا_ساحل العاج"},
+  {date:"2026-06-21",kickoff:"03:00",group:"E",home:"الإكوادور",away:"كوراساو",key:"E_الإكوادور_كوراساو"},
+  {date:"2026-06-21",kickoff:"07:00",group:"F",home:"تونس",away:"اليابان",key:"F_تونس_اليابان"},
+  {date:"2026-06-21",kickoff:"19:00",group:"G",home:"إسبانيا",away:"السعودية",key:"G_إسبانيا_السعودية"},
+  {date:"2026-06-21",kickoff:"22:00",group:"H",home:"بلجيكا",away:"إيران",key:"H_بلجيكا_إيران"},
+  {date:"2026-06-22",kickoff:"01:00",group:"G",home:"أوروغواي",away:"الرأس الأخضر",key:"G_أوروغواي_الرأس الأخضر"},
+  {date:"2026-06-22",kickoff:"04:00",group:"H",home:"نيوزيلندا",away:"مصر",key:"H_نيوزيلندا_مصر"},
+  {date:"2026-06-22",kickoff:"20:00",group:"J",home:"الأرجنتين",away:"النمسا",key:"J_الأرجنتين_النمسا"},
+  {date:"2026-06-23",kickoff:"00:00",group:"I",home:"فرنسا",away:"العراق",key:"I_فرنسا_العراق"},
+  {date:"2026-06-23",kickoff:"03:00",group:"I",home:"النرويج",away:"السنغال",key:"I_النرويج_السنغال"},
+  {date:"2026-06-23",kickoff:"06:00",group:"J",home:"الأردن",away:"الجزائر",key:"J_الأردن_الجزائر"},
+  {date:"2026-06-23",kickoff:"20:00",group:"K",home:"البرتغال",away:"أوزبكستان",key:"K_البرتغال_أوزبكستان"},
+  {date:"2026-06-23",kickoff:"23:00",group:"L",home:"إنجلترا",away:"غانا",key:"L_إنجلترا_غانا"},
+  {date:"2026-06-24",kickoff:"02:00",group:"K",home:"بنما",away:"كرواتيا",key:"K_بنما_كرواتيا"},
+  {date:"2026-06-24",kickoff:"05:00",group:"L",home:"كولومبيا",away:"الكونغو",key:"L_كولومبيا_الكونغو"},
+  {date:"2026-06-24",kickoff:"22:00",group:"B",home:"سويسرا",away:"كندا",key:"B_سويسرا_كندا"},
+  {date:"2026-06-24",kickoff:"22:00",group:"B",home:"البوسنة",away:"قطر",key:"B_البوسنة_قطر"},
+  {date:"2026-06-25",kickoff:"01:00",group:"C",home:"اسكتلندا",away:"البرازيل",key:"C_اسكتلندا_البرازيل"},
+  {date:"2026-06-25",kickoff:"01:00",group:"C",home:"المغرب",away:"هايتي",key:"C_المغرب_هايتي"},
+  {date:"2026-06-25",kickoff:"04:00",group:"A",home:"التشيك",away:"المكسيك",key:"A_التشيك_المكسيك"},
+  {date:"2026-06-25",kickoff:"04:00",group:"A",home:"جنوب أفريقيا",away:"كوريا الجنوبية",key:"A_جنوب أفريقيا_كوريا الجنوبية"},
+  {date:"2026-06-25",kickoff:"23:00",group:"E",home:"الإكوادور",away:"ألمانيا",key:"E_الإكوادور_ألمانيا"},
+  {date:"2026-06-25",kickoff:"23:00",group:"E",home:"كوراساو",away:"ساحل العاج",key:"E_كوراساو_ساحل العاج"},
+  {date:"2026-06-26",kickoff:"02:00",group:"F",home:"تونس",away:"هولندا",key:"F_تونس_هولندا"},
+  {date:"2026-06-26",kickoff:"02:00",group:"F",home:"اليابان",away:"السويد",key:"F_اليابان_السويد"},
+  {date:"2026-06-26",kickoff:"05:00",group:"D",home:"تركيا",away:"الولايات المتحدة",key:"D_تركيا_الولايات المتحدة"},
+  {date:"2026-06-26",kickoff:"05:00",group:"D",home:"باراغواي",away:"أستراليا",key:"D_باراغواي_أستراليا"},
+  {date:"2026-06-26",kickoff:"22:00",group:"I",home:"النرويج",away:"فرنسا",key:"I_النرويج_فرنسا"},
+  {date:"2026-06-26",kickoff:"22:00",group:"I",home:"السنغال",away:"العراق",key:"I_السنغال_العراق"},
+  {date:"2026-06-27",kickoff:"03:00",group:"G",home:"أوروغواي",away:"إسبانيا",key:"G_أوروغواي_إسبانيا"},
+  {date:"2026-06-27",kickoff:"03:00",group:"G",home:"الرأس الأخضر",away:"السعودية",key:"G_الرأس الأخضر_السعودية"},
+  {date:"2026-06-27",kickoff:"06:00",group:"H",home:"نيوزيلندا",away:"بلجيكا",key:"H_نيوزيلندا_بلجيكا"},
+  {date:"2026-06-27",kickoff:"06:00",group:"H",home:"مصر",away:"إيران",key:"H_مصر_إيران"},
+  {date:"2026-06-28",kickoff:"00:00",group:"K",home:"بنما",away:"إنجلترا",key:"K_بنما_إنجلترا"},
+  {date:"2026-06-28",kickoff:"00:00",group:"L",home:"كرواتيا",away:"غانا",key:"L_كرواتيا_غانا"},
+  {date:"2026-06-28",kickoff:"02:30",group:"L",home:"كولومبيا",away:"البرتغال",key:"L_كولومبيا_البرتغال"},
+  {date:"2026-06-28",kickoff:"02:30",group:"K",home:"الكونغو",away:"أوزبكستان",key:"K_الكونغو_أوزبكستان"},
+  {date:"2026-06-28",kickoff:"06:00",group:"J",home:"الأردن",away:"الأرجنتين",key:"J_الأردن_الأرجنتين"},
+  {date:"2026-06-28",kickoff:"06:00",group:"J",home:"الجزائر",away:"النمسا",key:"J_الجزائر_النمسا"},
+];
+
+const FLAGS = {
+  "المكسيك":"🇲🇽",
+  "جنوب أفريقيا":"🇿🇦",
+  "كوريا الجنوبية":"🇰🇷",
+  "التشيك":"🇨🇿",
+  "كندا":"🇨🇦",
+  "البوسنة":"🇧🇦",
+  "قطر":"🇶🇦",
+  "سويسرا":"🇨🇭",
+  "البرازيل":"🇧🇷",
+  "المغرب":"🇲🇦",
+  "هايتي":"🇭🇹",
+  "اسكتلندا":"🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+  "الولايات المتحدة":"🇺🇸",
+  "باراغواي":"🇵🇾",
+  "أستراليا":"🇦🇺",
+  "تركيا":"🇹🇷",
+  "ألمانيا":"🇩🇪",
+  "كوراساو":"🇨🇼",
+  "ساحل العاج":"🇨🇮",
+  "الإكوادور":"🇪🇨",
+  "هولندا":"🇳🇱",
+  "اليابان":"🇯🇵",
+  "السويد":"🇸🇪",
+  "تونس":"🇹🇳",
+  "إسبانيا":"🇪🇸",
+  "الرأس الأخضر":"🇨🇻",
+  "السعودية":"🇸🇦",
+  "أوروغواي":"🇺🇾",
+  "بلجيكا":"🇧🇪",
+  "مصر":"🇪🇬",
+  "إيران":"🇮🇷",
+  "نيوزيلندا":"🇳🇿",
+  "فرنسا":"🇫🇷",
+  "السنغال":"🇸🇳",
+  "العراق":"🇮🇶",
+  "النرويج":"🇳🇴",
+  "الأرجنتين":"🇦🇷",
+  "الجزائر":"🇩🇿",
+  "النمسا":"🇦🇹",
+  "الأردن":"🇯🇴",
+  "البرتغال":"🇵🇹",
+  "الكونغو":"🇨🇩",
+  "غانا":"🇬🇭",
+  "بنما":"🇵🇦",
+  "إنجلترا":"🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+  "كرواتيا":"🇭🇷",
+  "أوزبكستان":"🇺🇿",
+  "كولومبيا":"🇨🇴",
+};
+
+// ===== HELPERS =====
+function toWestern(s){return String(s).replace(/[٠١٢٣٤٥٦٧٨٩]/g,d=>d.charCodeAt(0)-0x0660);}
+// Empty score counts as 0
+function norm(v){const s=toWestern(String(_nullishCoalesce(v, () => ("")))).trim();return s===""?"0":s;}
+const WDAYS=["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"];
+const MONS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDate(d){const dt=new Date(d+"T00:00:00");return `${WDAYS[dt.getDay()]} ${dt.getDate()} ${MONS[dt.getMonth()]} ${dt.getFullYear()}`;}
+function getGroupMatches(teams){const m=[];for(let i=0;i<teams.length;i++)for(let j=i+1;j<teams.length;j++)m.push({home:teams[i],away:teams[j]});return m;}
+function getWinner(m){if(!m||m.h==null||m.h==="")return null;const h=parseInt(m.h),a=parseInt(m.a);return h>a?"home":a>h?"away":"draw";}
+function calcScore(preds,actual){let s=0;for(const k in actual){const p=preds[k],ac=actual[k];if(!p||p.h==null||p.h==="")continue;if(p.h==ac.h&&p.a==ac.a)s+=3;else if(getWinner(p)===getWinner(ac))s+=1;}return s;}
+function isMatchStarted(matchKey){const m=SCHEDULE.find(s=>s.key===matchKey);if(!m)return false;return new Date()>=new Date(m.date+"T"+m.kickoff+":00");}
+// Last group-stage match date; knockout tab appears only after it.
+const LAST_GROUP_DATE=SCHEDULE.reduce((mx,m)=>m.date>mx?m.date:mx,"2026-06-25");
+function groupStageEnded(){return new Date()>new Date(LAST_GROUP_DATE+"T23:59:59");}
+// Result of a prediction vs actual: "exact" | "winner" | "wrong" | null
+function predResult(p,ac){if(!ac||ac.h==null||ac.h===""||!p||p.h==null||p.h==="")return null;if(p.h==ac.h&&p.a==ac.a)return "exact";if(getWinner(p)===getWinner(ac))return "winner";return "wrong";}
+
+// ===== KNOCKOUT ROUNDS =====
+// Knockout matches are defined by the admin (manually or via API) once teams are known.
+// Each round has a fixed number of slots. Admin fills home/away team names + kickoff per slot.
+const KO_ROUNDS=[
+  {id:"r32",name:"دور الـ32",slots:16},
+  {id:"r16",name:"دور الـ16",slots:8},
+  {id:"qf", name:"ربع النهائي",slots:4},
+  {id:"sf", name:"نصف النهائي",slots:2},
+  {id:"f",  name:"النهائي",slots:1},
+];
+// koMatches shape: { r32:[{home,away,date,kickoff}, ...], r16:[...], ... }
+function koKey(roundId,idx){return `KO_${roundId}_${idx}`;}
+function koMatchStarted(m){if(!m||!m.date||!m.kickoff)return false;return new Date()>=new Date(m.date+"T"+m.kickoff+":00");}
+// Official 2026 knockout dates/times (local kickoff). Teams unknown until group stage ends; admin can edit any field.
+const KO_SCHEDULE={
+  r32:[
+    {date:"2026-06-28",kickoff:"22:00"},{date:"2026-06-29",kickoff:"20:00"},{date:"2026-06-29",kickoff:"23:30"},{date:"2026-06-30",kickoff:"04:00"},{date:"2026-06-30",kickoff:"20:00"},{date:"2026-07-01",kickoff:"00:00"},{date:"2026-07-01",kickoff:"04:00"},{date:"2026-07-01",kickoff:"19:00"},{date:"2026-07-01",kickoff:"23:00"},{date:"2026-07-02",kickoff:"03:00"},{date:"2026-07-02",kickoff:"22:00"},{date:"2026-07-03",kickoff:"02:00"},{date:"2026-07-03",kickoff:"06:00"},{date:"2026-07-03",kickoff:"21:00"},{date:"2026-07-04",kickoff:"01:00"},{date:"2026-07-04",kickoff:"04:30"}
+  ],
+  r16:[
+    {date:"2026-07-04",kickoff:"20:00"},{date:"2026-07-05",kickoff:"00:00"},{date:"2026-07-05",kickoff:"23:00"},{date:"2026-07-06",kickoff:"03:00"},{date:"2026-07-06",kickoff:"22:00"},{date:"2026-07-07",kickoff:"03:00"},{date:"2026-07-07",kickoff:"19:00"},{date:"2026-07-07",kickoff:"23:00"}
+  ],
+  qf:[
+    {date:"2026-07-09",kickoff:"23:00"},{date:"2026-07-10",kickoff:"22:00"},{date:"2026-07-12",kickoff:"00:00"},{date:"2026-07-12",kickoff:"04:00"}
+  ],
+  sf:[
+    {date:"2026-07-14",kickoff:"22:00"},{date:"2026-07-15",kickoff:"22:00"}
+  ],
+  f:[
+    {date:"2026-07-19",kickoff:"22:00"}
+  ],
+};
+function blankKO(){const o={};KO_ROUNDS.forEach(r=>{o[r.id]=Array.from({length:r.slots},(_,i)=>{const s=(KO_SCHEDULE[r.id]||[])[i]||{};return {home:"",away:"",date:s.date||"",kickoff:s.kickoff||""};});});return o;}
+
+const BY_DATE={};SCHEDULE.forEach(m=>{if(!BY_DATE[m.date])BY_DATE[m.date]=[];BY_DATE[m.date].push(m);});
+
+// ===== TOP-LEVEL COMPONENTS =====
+
+function ModeToggle({mode,onChange}){
+  return (
+    React.createElement('div', { style: {display:"flex",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,overflow:"hidden",marginBottom:16},}
+      , React.createElement('button', { style: {padding:"9px 16px",border:"none",background:mode==="group"?"rgba(0,212,255,0.15)":"transparent",color:mode==="group"?"#00d4ff":"#88aacc",cursor:"pointer",fontSize:13,fontWeight:600}, onClick: ()=>onChange("group"),}, "📋 مجموعة" )
+      , React.createElement('button', { style: {padding:"9px 16px",border:"none",background:mode==="date"?"rgba(0,212,255,0.15)":"transparent",color:mode==="date"?"#00d4ff":"#88aacc",cursor:"pointer",fontSize:13,fontWeight:600}, onClick: ()=>onChange("date"),}, "📅 تاريخ" )
+    )
+  );
+}
+
+function GroupTabs({active,onChange}){
+  return (
+    React.createElement('div', { style: {display:"flex",gap:8,flexWrap:"wrap",marginBottom:20},}
+      , Object.keys(GROUPS).map(g=>(
+        React.createElement('button', { key: g, style: {padding:"8px 14px",borderRadius:8,border:"1px solid",borderColor:active===g?"rgba(0,212,255,0.4)":"rgba(255,255,255,0.1)",background:active===g?"rgba(0,212,255,0.15)":"rgba(255,255,255,0.04)",color:active===g?"#00d4ff":"#88aacc",cursor:"pointer",fontSize:13,fontWeight:active===g?700:400}, onClick: ()=>onChange(g),}, g)
+      ))
+    )
+  );
+}
+
+// Student prediction card: per-match save with confirm + lock
+function PredictCard({matchKey,home,away,pred,locked,onSave,actualRes}){
+  const saved=pred&&pred.locked;
+  const started=isMatchStarted(matchKey);
+  const ended=actualRes&&actualRes.h!=null&&actualRes.h!=="";
+  const res=ended&&pred&&pred.h!=null&&pred.h!==""?predResult({h:pred.h,a:pred.a},actualRes):null;
+  const editable=!saved&&!started;
+  const m=SCHEDULE.find(s=>s.key===matchKey);
+  const [h,setH]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _2 => _2.h]), () => ("")));
+  const [a,setA]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _3 => _3.a]), () => ("")));
+  const [confirming,setConfirming]=useState(false);
+  const prevKey=useRef(matchKey);
+  useEffect(()=>{
+    if(prevKey.current!==matchKey){prevKey.current=matchKey;setH(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _4 => _4.h]), () => ("")));setA(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _5 => _5.a]), () => ("")));setConfirming(false);}
+  });
+
+  const dispH=saved?pred.h:h;
+  const dispA=saved?pred.a:a;
+  const w=(dispH!==""&&dispH!=null)||(dispA!==""&&dispA!=null)
+    ? (parseInt(norm(dispH))>parseInt(norm(dispA))?`🏆 ${home}`:parseInt(norm(dispA))>parseInt(norm(dispH))?`🏆 ${away}`:"🤝 تعادل")
+    : null;
+
+  const SI=(disabled)=>({width:46,height:46,borderRadius:9,border:"1px solid rgba(0,212,255,0.25)",background:"rgba(0,212,255,0.06)",color:"#00d4ff",fontSize:21,fontWeight:800,textAlign:"center",outline:"none",...(disabled?{opacity:0.5,cursor:"not-allowed",background:"rgba(255,255,255,0.02)"}:{})});
+
+  let badge=null;
+  if(saved)badge=React.createElement('span', { style: {fontSize:10,background:"rgba(0,200,100,0.15)",color:"#00c864",borderRadius:5,padding:"2px 7px"},}, "🔒 محفوظ" );
+  else if(started)badge=React.createElement('span', { style: {fontSize:10,background:"rgba(255,150,50,0.15)",color:"#ffaa55",borderRadius:5,padding:"2px 7px"},}, "⏰ بدأت" );
+
+  return (
+    React.createElement('div', { style: {...S.matchCard,...(saved?{borderColor:"rgba(0,200,100,0.3)"}:started?{borderColor:"rgba(255,150,50,0.25)"}:{})},}
+      , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8},}
+        , React.createElement('span', { style: {fontSize:11,color:"#556680"},}, "⏰ " , m?m.kickoff:"", " — "  , m?fmtDate(m.date):"")
+        , badge
+      )
+      , React.createElement('div', { style: S.matchTeams,}
+        , React.createElement('div', { style: S.team,}, React.createElement('span', { style: S.flag,}, FLAGS[home]||"🏳️"), React.createElement('span', { style: S.tname,}, home))
+        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:7,flexShrink:0},}
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI(!editable), value: dispH, placeholder: "0", disabled: !editable,
+            onChange: e=>{if(!editable)return;setH(toWestern(e.target.value));setConfirming(false);},})
+          , React.createElement('span', { style: {color:"#556680",fontSize:17,fontWeight:700},}, "—")
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI(!editable), value: dispA, placeholder: "0", disabled: !editable,
+            onChange: e=>{if(!editable)return;setA(toWestern(e.target.value));setConfirming(false);},})
+        )
+        , React.createElement('div', { style: {...S.team,justifyContent:"flex-end"},}, React.createElement('span', { style: S.tname,}, away), React.createElement('span', { style: S.flag,}, FLAGS[away]||"🏳️"))
+      )
+      , w&&React.createElement('div', { style: S.predLabel,}, w)
+
+      , ended&&(
+        React.createElement('div', { style: {marginTop:9,display:"flex",flexDirection:"column",gap:6},}
+          , React.createElement('div', { style: {textAlign:"center",fontSize:11,fontWeight:700,background:"rgba(120,120,140,0.15)",border:"1px solid rgba(150,150,170,0.3)",color:"#aab4c8",borderRadius:6,padding:"3px 8px"},}, "🏁 انتهت المباراة — النتيجة "     , actualRes.h, "—", actualRes.a, actualRes.pen?` (ترجيح: ${actualRes.pen})`:"")
+          , res&&React.createElement('div', { style: {textAlign:"center",fontSize:12,fontWeight:700,borderRadius:6,padding:"4px 10px",...(res==="exact"?{background:"rgba(0,200,100,0.15)",color:"#00c864"}:res==="winner"?{background:"rgba(255,200,0,0.15)",color:"#ffd700"}:{background:"rgba(255,60,60,0.12)",color:"#ff6060"})},}, res==="exact"?"🎯 توقعك: نتيجة صحيحة (+3)":res==="winner"?"✅ توقعك: فائز صحيح (+1)":"❌ توقعك: خاطئ (0)")
+          , !res&&React.createElement('div', { style: {textAlign:"center",fontSize:11,color:"#556680"},}, "لم تتوقّع هذه المباراة"   )
+        )
+      )
+      , saved&&!ended&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#00c864"},}, "✅ تم حفظ توقعك — لا يمكن تغييره إلا بموافقة المشرف"          )
+      , !saved&&started&&!ended&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#ffaa55"},}, "انتهى وقت التوقع لهذه المباراة"    )
+
+      , editable&&!confirming&&(
+        React.createElement('button', { style: {...S.saveBtn,width:"100%",marginTop:10,justifyContent:"center"}, onClick: ()=>setConfirming(true),}, "💾 حفظ هذا التوقع"   )
+      )
+      , editable&&confirming&&(
+        React.createElement('div', { style: {marginTop:10,background:"rgba(255,200,0,0.08)",border:"1px solid rgba(255,200,0,0.25)",borderRadius:10,padding:12},}
+          , React.createElement('div', { style: {fontSize:12,color:"#ffd700",marginBottom:10,lineHeight:1.6},}, "⚠️ سيتم حفظ التوقع ("    , norm(dispH), "—", norm(dispA), ") ولن تتمكن من تغييره إلا بموافقة المشرف. هل أنت متأكد؟"          )
+          , React.createElement('div', { style: {display:"flex",gap:8},}
+            , React.createElement('button', { style: {...S.btn,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>onSave(matchKey,norm(dispH),norm(dispA)),}, "نعم، احفظ" )
+            , React.createElement('button', { style: {...S.btn2,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>setConfirming(false),}, "تراجع")
+          )
+        )
+      )
+    )
+  );
+}
+
+function CmMatchCard({matchKey,home,away,studentPreds,actual}){
+  const p=_optionalChain([studentPreds, 'optionalAccess', _6 => _6[matchKey]]);
+  const ac=actual[matchKey];
+  const hasAc=ac&&ac.h!=null&&ac.h!=="";
+  const pts=(()=>{if(!p||p.h==null||p.h===""||!hasAc)return null;if(p.h==ac.h&&p.a==ac.a)return 3;if(getWinner(p)===getWinner(ac))return 1;return 0;})();
+  const bc=pts===3?"rgba(0,200,100,0.4)":pts===1?"rgba(255,200,0,0.4)":pts===0?"rgba(255,60,60,0.25)":"rgba(255,255,255,0.08)";
+  return (
+    React.createElement('div', { style: {...S.matchCard,borderColor:bc},}
+      , React.createElement('div', { style: S.matchTeams,}
+        , React.createElement('div', { style: S.team,}, React.createElement('span', { style: S.flag,}, FLAGS[home]||"🏳️"), React.createElement('span', { style: S.tname,}, home))
+        , React.createElement('div', { style: {display:"flex",flexDirection:"column",alignItems:"center",gap:4,minWidth:90},}
+          , p&&p.h!==""&&p.h!=null
+            ? React.createElement('div', { style: {display:"flex",alignItems:"center",gap:5},}, React.createElement('span', { style: {fontSize:19,fontWeight:900,color:"#00d4ff"},}, p.h), React.createElement('span', { style: {color:"#556680"},}, "—"), React.createElement('span', { style: {fontSize:19,fontWeight:900,color:"#00d4ff"},}, p.a))
+            : React.createElement('span', { style: {fontSize:11,color:"#444d60",fontStyle:"italic"},}, "لم يتوقع" )
+          , pts!==null&&React.createElement('div', { style: {fontSize:11,fontWeight:700,borderRadius:6,padding:"2px 8px",...(pts===3?{background:"rgba(0,200,100,0.2)",color:"#00c864"}:pts===1?{background:"rgba(255,200,0,0.15)",color:"#ffd700"}:{background:"rgba(255,60,60,0.15)",color:"#ff6060"})},}, pts===3?"🎯 +3":pts===1?"✅ +1":"❌ 0")
+          , hasAc&&React.createElement('div', { style: {fontSize:10,color:"#556680"},}, "الفعلي: " , ac.h, "—", ac.a)
+        )
+        , React.createElement('div', { style: {...S.team,justifyContent:"flex-end"},}, React.createElement('span', { style: S.tname,}, away), React.createElement('span', { style: S.flag,}, FLAGS[away]||"🏳️"))
+      )
+    )
+  );
+}
+
+function StatBar({label,list,total,color,emoji}){
+  const [open,setOpen]=useState(false);
+  const pct=total>0?Math.round((list.length/total)*100):0;
+  return (
+    React.createElement('div', { style: {marginBottom:10},}
+      , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4},}
+        , React.createElement('span', { style: {fontSize:13,fontWeight:600},}, emoji, " " , label)
+        , React.createElement('span', { style: {fontSize:13,color:"#88aacc"},}, list.length, " (" , pct, "%)")
+      )
+      , React.createElement('div', { style: {height:10,borderRadius:5,background:"rgba(255,255,255,0.06)",overflow:"hidden",cursor:"pointer"}, onClick: ()=>setOpen(o=>!o),}
+        , React.createElement('div', { style: {height:"100%",width:`${pct}%`,background:color,borderRadius:5,transition:"width 0.5s"},})
+      )
+      , open&&list.length>0&&(
+        React.createElement('div', { style: {marginTop:6,display:"flex",flexWrap:"wrap",gap:5},}
+          , list.map(s=>(
+            React.createElement('div', { key: s.name, style: {fontSize:11,background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",color:"#ccd8f0"},}
+              , s.name, " " , React.createElement('span', { style: {color:"#00d4ff",fontFamily:"monospace"},}, s.score)
+            )
+          ))
+        )
+      )
+    )
+  );
+}
+
+function StatsCard({matchKey,home,away,preds,actual}){
+  const students=Object.keys(preds);
+  const total=students.length;
+  const homeWin=[],awayWin=[],draw=[],noPred=[];
+  students.forEach(name=>{
+    const p=_optionalChain([preds, 'access', _7 => _7[name], 'optionalAccess', _8 => _8.predictions, 'optionalAccess', _9 => _9[matchKey]]);
+    if(!p||p.h==null||p.h===""){noPred.push(name);return;}
+    const w=getWinner(p);
+    if(w==="home")homeWin.push({name,score:`${p.h}-${p.a}`});
+    else if(w==="away")awayWin.push({name,score:`${p.h}-${p.a}`});
+    else draw.push({name,score:`${p.h}-${p.a}`});
+  });
+  const ac=actual[matchKey];
+  const hasAc=ac&&ac.h!=null&&ac.h!=="";
+  return (
+    React.createElement('div', { style: {...S.matchCard,padding:20},}
+      , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8},}
+        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:6},}
+          , React.createElement('span', { style: S.flag,}, FLAGS[home]||"🏳️")
+          , React.createElement('span', { style: {fontSize:13,fontWeight:700},}, home)
+          , React.createElement('span', { style: {color:"#556680",fontSize:12},}, "vs")
+          , React.createElement('span', { style: {fontSize:13,fontWeight:700},}, away)
+          , React.createElement('span', { style: S.flag,}, FLAGS[away]||"🏳️")
+        )
+        , hasAc&&React.createElement('div', { style: {fontSize:12,background:"rgba(0,200,100,0.12)",border:"1px solid rgba(0,200,100,0.3)",color:"#00c864",borderRadius:6,padding:"3px 10px"},}, "الفعلي: " , ac.h, "—", ac.a)
+      )
+      , React.createElement(StatBar, { label: home, list: homeWin, total: total, color: "rgba(0,180,255,0.7)", emoji: "🔵",})
+      , React.createElement(StatBar, { label: "تعادل", list: draw, total: total, color: "rgba(180,180,180,0.6)", emoji: "🟡",})
+      , React.createElement(StatBar, { label: away, list: awayWin, total: total, color: "rgba(255,100,100,0.7)", emoji: "🔴",})
+      , noPred.length>0&&React.createElement('div', { style: {fontSize:11,color:"#445566",marginTop:4},}, "بدون توقع: "  , noPred.join("، "))
+      , React.createElement('div', { style: {fontSize:10,color:"#2a3a4a",marginTop:6},}, "اضغط الشريط لرؤية الأسماء"   )
+    )
+  );
+}
+
+function DateBlocks({renderCard}){
+  return (
+    React.createElement('div', null
+      , Object.entries(BY_DATE).map(([date,matches])=>(
+        React.createElement('div', { key: date, style: {marginBottom:28},}
+          , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:10,marginBottom:14,fontSize:15,fontWeight:700,color:"#ccd8f0"},}
+            , React.createElement('span', null, "📅"), fmtDate(date), React.createElement('span', { style: {fontSize:12,color:"#00d4ff",background:"rgba(0,212,255,0.1)",border:"1px solid rgba(0,212,255,0.2)",borderRadius:6,padding:"2px 10px"},}, "المجموعة " , matches[0].group)
+          )
+          , React.createElement('div', { style: S.grid,}, matches.map(m=>renderCard(m)))
+        )
+      ))
+    )
+  );
+}
+
+// Admin result-entry card (empty = 0 on save, per-match auto-save)
+function AdminMatchCard({matchKey,home,away,actual,onSave,onReset,allowPen}){
+  const e=actual[matchKey]||{};
+  const [h,setH]=useState(_nullishCoalesce(e.h, () => ("")));
+  const [a,setA]=useState(_nullishCoalesce(e.a, () => ("")));
+  const [pen,setPen]=useState(_nullishCoalesce(e.pen, () => ("")));
+  const [savedFlash,setSavedFlash]=useState(false);
+  const prevKey=useRef(matchKey);
+  useEffect(()=>{if(prevKey.current!==matchKey){prevKey.current=matchKey;setH(_nullishCoalesce(e.h, () => ("")));setA(_nullishCoalesce(e.a, () => ("")));setPen(_nullishCoalesce(e.pen, () => ("")));}});
+  const done=e.h!==""&&e.h!=null&&e.a!==""&&e.a!=null;
+  const isDraw=done&&parseInt(e.h)===parseInt(e.a);
+  const liveDraw=(h!==""&&h!=null&&a!==""&&a!=null&&parseInt(norm(h))===parseInt(norm(a)));
+  const w=done?(parseInt(e.h)>parseInt(e.a)?`🏆 ${home}`:parseInt(e.a)>parseInt(e.h)?`🏆 ${away}`:"🤝 تعادل"):null;
+  const SI={width:46,height:46,borderRadius:9,border:"1px solid rgba(255,200,0,0.3)",background:"rgba(255,200,0,0.06)",color:"#ffd700",fontSize:21,fontWeight:800,textAlign:"center",outline:"none"};
+  const penBtn=(team,active)=>({flex:1,padding:"7px 6px",borderRadius:8,border:"1px solid",borderColor:active?"rgba(255,215,0,0.5)":"rgba(255,255,255,0.12)",background:active?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",color:active?"#ffd700":"#ccd8f0",cursor:"pointer",fontSize:12,fontWeight:active?700:500});
+  function save(){onSave(matchKey,norm(h),norm(a),(allowPen&&liveDraw)?pen:"");setSavedFlash(true);setTimeout(()=>setSavedFlash(false),1500);}
+  function reset(){onReset(matchKey);setH("");setA("");setPen("");}
+  return (
+    React.createElement('div', { style: {...S.matchCard,...(done?S.doneCard:{borderColor:"rgba(255,200,0,0.15)"})},}
+      , done&&React.createElement('div', { style: S.autoTag,}, "✅ مُدخلة" )
+      , React.createElement('div', { style: S.matchTeams,}
+        , React.createElement('div', { style: S.team,}, React.createElement('span', { style: S.flag,}, FLAGS[home]||"🏳️"), React.createElement('span', { style: S.tname,}, home))
+        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:7,flexShrink:0},}
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: h, placeholder: "0", onChange: e=>setH(toWestern(e.target.value)),})
+          , React.createElement('span', { style: {color:"#556680",fontSize:17,fontWeight:700},}, "—")
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: a, placeholder: "0", onChange: e=>setA(toWestern(e.target.value)),})
+        )
+        , React.createElement('div', { style: {...S.team,justifyContent:"flex-end"},}, React.createElement('span', { style: S.tname,}, away), React.createElement('span', { style: S.flag,}, FLAGS[away]||"🏳️"))
+      )
+      , w&&React.createElement('div', { style: {...S.predLabel,color:"#ffd700",background:"rgba(255,200,0,0.08)"},}, w)
+      , allowPen&&liveDraw&&(
+        React.createElement('div', { style: {marginTop:10},}
+          , React.createElement('div', { style: {fontSize:11,color:"#ffd700",marginBottom:6,textAlign:"center"},}, "⚽ الفائز بركلات الترجيح"   )
+          , React.createElement('div', { style: {display:"flex",gap:8},}
+            , React.createElement('button', { style: penBtn(home,pen===home), onClick: ()=>setPen(home),}, FLAGS[home]||"🏳️", " " , home)
+            , React.createElement('button', { style: penBtn(away,pen===away), onClick: ()=>setPen(away),}, FLAGS[away]||"🏳️", " " , away)
+          )
+        )
+      )
+      , done&&isDraw&&e.pen&&React.createElement('div', { style: {fontSize:11,color:"#ffd700",marginTop:6,textAlign:"center"},}, "🏆 الترجيح: "  , e.pen)
+      , React.createElement('div', { style: {display:"flex",gap:8,marginTop:10},}
+        , React.createElement('button', { style: {...S.btn2,flex:1,...(savedFlash?{background:"rgba(0,200,100,0.15)",borderColor:"rgba(0,200,100,0.4)",color:"#00c864"}:{})}, onClick: save,}, savedFlash?"✅ حُفظت":"💾 حفظ النتيجة")
+        , done&&React.createElement('button', { style: {...S.delBtn,padding:"0 14px"}, onClick: reset, title: "إعادة تصفير هذه النتيجة"   ,}, "↺ تصفير" )
+      )
+    )
+  );
+}
+
+function LbRow({s,i,isMe,preds,actual}){
+  const [open,setOpen]=useState(false);
+  // Compute breakdown + collect short match labels per category
+  let exact=0,winner=0,wrong=0;
+  const exactL=[],winnerL=[],wrongL=[];
+  const predObj=_optionalChain([preds, 'access', _10 => _10[s.name], 'optionalAccess', _11 => _11.predictions])||{};
+  function shortLabel(k,p,ac){
+    // find teams: group match in SCHEDULE, else knockout (KO_) — use stored names if available
+    const sm=SCHEDULE.find(x=>x.key===k);
+    let home=sm?sm.home:"",away=sm?sm.away:"";
+    const nm=(t)=>t||"";
+    return `${nm(home)} ${p.h}-${p.a}${ac?` (الفعلي ${ac.h}-${ac.a})`:""} ${nm(away)}`.trim();
+  }
+  Object.keys(actual).forEach(k=>{
+    const p=predObj[k],ac=actual[k];
+    if(!p||p.h==null||p.h==="")return;
+    const r=predResult(p,ac);
+    if(r==="exact"){exact++;exactL.push(shortLabel(k,p,ac));}
+    else if(r==="winner"){winner++;winnerL.push(shortLabel(k,p,ac));}
+    else if(r==="wrong"){wrong++;wrongL.push(shortLabel(k,p,ac));}
+  });
+  const hasResults=Object.keys(actual).length>0;
+  const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+  const rowBg=i===0?{background:"rgba(255,215,0,0.1)",border:"1px solid rgba(255,215,0,0.3)"}:i===1?{background:"rgba(192,192,192,0.08)",border:"1px solid rgba(192,192,192,0.25)"}:i===2?{background:"rgba(205,127,50,0.08)",border:"1px solid rgba(205,127,50,0.25)"}:{};
+  const listBox=(title,arr,color)=>arr.length>0&&(
+    React.createElement('div', { style: {marginTop:8},}
+      , React.createElement('div', { style: {fontSize:11,fontWeight:700,color,marginBottom:4},}, title, " (" , arr.length, ")")
+      , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:3},}
+        , arr.map((t,idx)=>React.createElement('div', { key: idx, style: {fontSize:11,color:"#ccd8f0",background:"rgba(0,0,0,0.18)",borderRadius:5,padding:"3px 8px"},}, t))
+      )
+    )
+  );
+  return (
+    React.createElement('div', { style: {...S.lbRow,flexDirection:"column",alignItems:"stretch",...rowBg,...(isMe?{boxShadow:"0 0 0 2px rgba(0,212,255,0.4)"}:{}),cursor:"pointer"}, onClick: ()=>setOpen(o=>!o),}
+      , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:16},}
+        , React.createElement('span', { style: {fontSize:22,minWidth:36},}, medal)
+        , React.createElement('div', { style: {flex:1,display:"flex",flexDirection:"column",gap:4},}
+          , React.createElement('span', { style: {fontWeight:700,fontSize:15},}, s.name, isMe?" (أنت)":"", " " , React.createElement('span', { style: {fontSize:11,color:"#556680"},}, open?"▲":"▼"))
+          , hasResults&&React.createElement('div', { style: {display:"flex",gap:8,flexWrap:"wrap"},}, React.createElement('span', { style: S.b3,}, "🎯 " , exact, " نتيجة صحيحة"  ), React.createElement('span', { style: S.b1,}, "✅ " , winner, " فائز صحيح"  ))
+        )
+        , React.createElement('div', { style: {display:"flex",flexDirection:"column",alignItems:"center"},}, React.createElement('span', { style: {fontWeight:900,color:"#ffd700",fontSize:22,lineHeight:1},}, s.score), React.createElement('span', { style: {fontSize:11,color:"#88aacc"},}, "نقطة"))
+      )
+      , open&&(
+        React.createElement('div', { style: {marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.08)"},}
+          , React.createElement('div', { style: {display:"flex",gap:10,flexWrap:"wrap",justifyContent:"space-around",marginBottom:6},}
+            , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#00c864"},}, exact), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "نتيجة صحيحة (3)"  ))
+            , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#ffd700"},}, winner), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "فائز صحيح (1)"  ))
+            , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#ff6060"},}, wrong), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "توقع خاطئ (0)"  ))
+            , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#00d4ff"},}, s.score), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "المجموع"))
+          )
+          , !hasResults&&React.createElement('div', { style: {fontSize:11,color:"#556680",textAlign:"center"},}, "لا توجد نتائج مُدخلة بعد"    )
+          , listBox("🎯 نتائج صحيحة",exactL,"#00c864")
+          , listBox("✅ فائز صحيح",winnerL,"#ffd700")
+          , listBox("❌ توقعات خاطئة",wrongL,"#ff6060")
+        )
+      )
+    )
+  );
+}
+
+// Knockout prediction card (competitor side) — same scoring, per-match save+lock
+function KoPredictCard({koKeyId,home,away,date,kickoff,pred,onSave}){
+  const saved=pred&&pred.locked;
+  const started=koMatchStarted({date,kickoff});
+  const editable=!saved&&!started;
+  const [h,setH]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _12 => _12.h]), () => ("")));
+  const [a,setA]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _13 => _13.a]), () => ("")));
+  const [pen,setPen]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _14 => _14.pen]), () => ("")));
+  const [confirming,setConfirming]=useState(false);
+  const prevKey=useRef(koKeyId);
+  useEffect(()=>{if(prevKey.current!==koKeyId){prevKey.current=koKeyId;setH(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _15 => _15.h]), () => ("")));setA(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _16 => _16.a]), () => ("")));setPen(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _17 => _17.pen]), () => ("")));setConfirming(false);}});
+  const dispH=saved?pred.h:h, dispA=saved?pred.a:a;
+  const dispPen=saved?(pred.pen||""):pen;
+  const isDraw=(dispH!==""&&dispH!=null&&dispA!==""&&dispA!=null&&parseInt(norm(dispH))===parseInt(norm(dispA)));
+  const w=(dispH!==""&&dispH!=null)||(dispA!==""&&dispA!=null)
+    ?(parseInt(norm(dispH))>parseInt(norm(dispA))?`🏆 ${home}`:parseInt(norm(dispA))>parseInt(norm(dispH))?`🏆 ${away}`:"🤝 تعادل")
+    :null;
+  const SI=(d)=>({width:46,height:46,borderRadius:9,border:"1px solid rgba(0,212,255,0.25)",background:"rgba(0,212,255,0.06)",color:"#00d4ff",fontSize:21,fontWeight:800,textAlign:"center",outline:"none",...(d?{opacity:0.5,cursor:"not-allowed",background:"rgba(255,255,255,0.02)"}:{})});
+  const penBtn=(team,active)=>({flex:1,padding:"8px 6px",borderRadius:8,border:"1px solid",borderColor:active?"rgba(255,215,0,0.5)":"rgba(255,255,255,0.12)",background:active?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",color:active?"#ffd700":"#ccd8f0",cursor:editable?"pointer":"default",fontSize:12,fontWeight:active?700:500});
+  let badge=null;
+  if(saved)badge=React.createElement('span', { style: {fontSize:10,background:"rgba(0,200,100,0.15)",color:"#00c864",borderRadius:5,padding:"2px 7px"},}, "🔒 محفوظ" );
+  else if(started)badge=React.createElement('span', { style: {fontSize:10,background:"rgba(255,150,50,0.15)",color:"#ffaa55",borderRadius:5,padding:"2px 7px"},}, "⏰ بدأت" );
+  const canSave = !isDraw || (dispPen===home||dispPen===away);
+  return (
+    React.createElement('div', { style: {...S.matchCard,...(saved?{borderColor:"rgba(0,200,100,0.3)"}:started?{borderColor:"rgba(255,150,50,0.25)"}:{})},}
+      , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8},}
+        , React.createElement('span', { style: {fontSize:11,color:"#556680"},}, kickoff?`⏰ ${kickoff}`:"", date?` — ${fmtDate(date)}`:"")
+        , badge
+      )
+      , React.createElement('div', { style: S.matchTeams,}
+        , React.createElement('div', { style: S.team,}, React.createElement('span', { style: S.flag,}, FLAGS[home]||"🏳️"), React.createElement('span', { style: S.tname,}, home))
+        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:7,flexShrink:0},}
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI(!editable), value: dispH, placeholder: "0", disabled: !editable, onChange: e=>{if(!editable)return;setH(toWestern(e.target.value));setConfirming(false);},})
+          , React.createElement('span', { style: {color:"#556680",fontSize:17,fontWeight:700},}, "—")
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI(!editable), value: dispA, placeholder: "0", disabled: !editable, onChange: e=>{if(!editable)return;setA(toWestern(e.target.value));setConfirming(false);},})
+        )
+        , React.createElement('div', { style: {...S.team,justifyContent:"flex-end"},}, React.createElement('span', { style: S.tname,}, away), React.createElement('span', { style: S.flag,}, FLAGS[away]||"🏳️"))
+      )
+      , w&&React.createElement('div', { style: S.predLabel,}, w)
+      , isDraw&&(
+        React.createElement('div', { style: {marginTop:10},}
+          , React.createElement('div', { style: {fontSize:11,color:"#ffd700",marginBottom:6,textAlign:"center"},}, "⚽ من يفوز بركلات الترجيح؟"    )
+          , React.createElement('div', { style: {display:"flex",gap:8},}
+            , React.createElement('button', { style: penBtn(home,dispPen===home), disabled: !editable, onClick: ()=>{if(!editable)return;setPen(home);setConfirming(false);},}, FLAGS[home]||"🏳️", " " , home)
+            , React.createElement('button', { style: penBtn(away,dispPen===away), disabled: !editable, onClick: ()=>{if(!editable)return;setPen(away);setConfirming(false);},}, FLAGS[away]||"🏳️", " " , away)
+          )
+        )
+      )
+      , saved&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#00c864"},}, "✅ تم حفظ توقعك"   , saved&&pred.pen?` — الترجيح: ${pred.pen}`:"")
+      , !saved&&started&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#ffaa55"},}, "انتهى وقت التوقع"  )
+      , editable&&!confirming&&React.createElement('button', { style: {...S.saveBtn,width:"100%",marginTop:10,justifyContent:"center",...(canSave?{}:{opacity:0.5})}, disabled: !canSave, onClick: ()=>canSave&&setConfirming(true),}, "💾 حفظ هذا التوقع"   )
+      , editable&&!canSave&&React.createElement('div', { style: {fontSize:10,color:"#ffaa55",textAlign:"center",marginTop:6},}, "اختر الفائز بالترجيح أولاً"   )
+      , editable&&confirming&&(
+        React.createElement('div', { style: {marginTop:10,background:"rgba(255,200,0,0.08)",border:"1px solid rgba(255,200,0,0.25)",borderRadius:10,padding:12},}
+          , React.createElement('div', { style: {fontSize:12,color:"#ffd700",marginBottom:10,lineHeight:1.6},}, "⚠️ سيتم حفظ التوقع ("    , norm(dispH), "—", norm(dispA), ")", isDraw&&dispPen?` والفائز بالترجيح ${dispPen}`:"", " ولن تتمكن من تغييره إلا بموافقة المشرف."       )
+          , React.createElement('div', { style: {display:"flex",gap:8},}
+            , React.createElement('button', { style: {...S.btn,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>onSave(koKeyId,norm(dispH),norm(dispA),isDraw?dispPen:""),}, "نعم، احفظ" )
+            , React.createElement('button', { style: {...S.btn2,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>setConfirming(false),}, "تراجع")
+          )
+        )
+      )
+    )
+  );
+}
+
+// Champion picker with confirm + lock
+function ChampionPicker({teams,onSave}){
+  const [sel,setSel]=useState("");
+  const [confirming,setConfirming]=useState(false);
+  return (
+    React.createElement('div', null
+      , React.createElement('div', { style: {display:"flex",flexWrap:"wrap",gap:8,marginBottom:14},}
+        , teams.map(t=>(
+          React.createElement('button', { key: t, onClick: ()=>{setSel(t);setConfirming(false);}, style: {padding:"8px 14px",borderRadius:9,border:"1px solid",borderColor:sel===t?"rgba(255,215,0,0.5)":"rgba(255,255,255,0.1)",background:sel===t?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",color:sel===t?"#ffd700":"#ccd8f0",cursor:"pointer",fontSize:13,fontWeight:sel===t?700:500},}
+            , FLAGS[t]||"🏳️", " " , t
+          )
+        ))
+      )
+      , sel&&!confirming&&React.createElement('button', { style: {...S.btn,width:"100%"}, onClick: ()=>setConfirming(true),}, "👑 حفظ توقع البطل: "    , sel)
+      , sel&&confirming&&(
+        React.createElement('div', { style: {background:"rgba(255,200,0,0.08)",border:"1px solid rgba(255,200,0,0.25)",borderRadius:10,padding:12},}
+          , React.createElement('div', { style: {fontSize:12,color:"#ffd700",marginBottom:10,lineHeight:1.6},}, "⚠️ سيتم حفظ توقعك بأن البطل هو «"       , sel, "» ولن تتمكن من تغييره إلا بموافقة المشرف."       )
+          , React.createElement('div', { style: {display:"flex",gap:8},}
+            , React.createElement('button', { style: {...S.btn,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>onSave(sel),}, "نعم، احفظ" )
+            , React.createElement('button', { style: {...S.btn2,flex:1,fontSize:13,padding:"9px 0"}, onClick: ()=>setConfirming(false),}, "تراجع")
+          )
+        )
+      )
+    )
+  );
+}
+
+// ===== ADMIN PANEL =====
+function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,koMatches,setKoMatches}){
+  const ADMIN_PASS="teacher2026";
+  const [unlocked,setUnlocked]=useState(false);
+  const [pass,setPass]=useState("");
+  const [showPass,setShowPass]=useState(false);
+  const [passErr,setPassErr]=useState("");
+  const [newCompName,setNewCompName]=useState("");
+  const [compMsg,setCompMsg]=useState("");
+  const [confirmDel,setConfirmDel]=useState("");
+  const [unlockedNow,setUnlockedNow]=useState({});
+  const [newId,setNewId]=useState("");
+  const [newName,setNewName]=useState("");
+  const [singleMsg,setSingleMsg]=useState("");
+  const [bulkInput,setBulkInput]=useState("");
+  const [bulkMsg,setBulkMsg]=useState("");
+  const [browseMode,setBrowseMode]=useState("group");
+  const [activeGroup,setActiveGroup]=useState("A");
+  const [loading,setLoading]=useState(true);
+  const fileRef=useRef();
+
+  useEffect(()=>{
+    // Always start locked; clear any legacy persisted unlock; lock again on unmount (leaving Settings)
+    try{localStorage.removeItem("wc26adm");}catch (e4){}
+    setUnlocked(false);
+    setLoading(false);
+    return ()=>{setUnlocked(false);};
+  },[]);
+
+  function unlock(){
+    if(pass.trim()===ADMIN_PASS){setUnlocked(true);setPassErr("");}
+    else setPassErr("كلمة المرور غير صحيحة");
+  }
+  function lockAdmin(){setUnlocked(false);setPass("");}
+
+  const comp=comps[activeComp];
+  const roster=_optionalChain([comp, 'optionalAccess', _18 => _18.roster])||{};
+  const preds=allData.preds||{};
+  const [koRound,setKoRound]=useState("r32");
+  const [koEditMatches,setKoEditMatches]=useState(()=>koMatches&&Object.keys(koMatches).length?koMatches:blankKO());
+  const [koMsg,setKoMsg]=useState("");
+  const [champTeam,setChampTeam]=useState((allData.actual&&allData.actual.CHAMPION&&allData.actual.CHAMPION.team)||"");
+  useEffect(()=>{ if(koMatches&&Object.keys(koMatches).length)setKoEditMatches(koMatches); },[koMatches]);
+
+  function setKoField(roundId,idx,field,val){
+    setKoEditMatches(prev=>{
+      const next={...prev,[roundId]:[...(prev[roundId]||[])]};
+      next[roundId][idx]={...next[roundId][idx],[field]:val};
+      return next;
+    });
+  }
+  async function saveKoMatches(){
+    await dbSet("koMatches",koEditMatches);
+    setKoMatches(koEditMatches);
+    setKoMsg("✅ تم حفظ مباريات الأدوار الإقصائية");
+    reloadComp(activeComp);
+  }
+  async function saveKoResult(roundId,idx,h,a,pen){
+    const kk=koKey(roundId,idx);
+    const next={...(allData.actual||{}),[kk]:{h,a,pen:pen||""}};
+    await dbSet("actual",next);
+    reloadComp(activeComp);
+  }
+  async function saveChampionResult(team){
+    const next={...(allData.actual||{}),CHAMPION:{team}};
+    await dbSet("actual",next);
+    setChampTeam(team);
+    reloadComp(activeComp);
+  }
+  const actual=allData.actual||{};
+
+  async function createComp(){
+    const name=newCompName.trim();
+    if(!name){setCompMsg("❌ أدخل اسم المسابقة");return;}
+    const exists=Object.values(comps).some(c=>c.name===name);
+    if(exists){setCompMsg("❌ يوجد مسابقة بنفس الاسم");return;}
+    const code="c"+Date.now().toString(36);
+    const next={...comps,[code]:{name,roster:{}}};
+    await dbSet("comps",next);setComps(next);
+    setNewCompName("");setCompMsg(`✅ تم إنشاء "${name}"`);
+    setActiveComp(code);
+  }
+
+  async function deleteComp(code){
+    const next={...comps};delete next[code];
+    await dbSet("comps",next);setComps(next);
+    await dbSet("preds_"+code,{});
+    setConfirmDel("");
+    if(activeComp===code){const first=Object.keys(next)[0]||"";setActiveComp(first);}
+  }
+
+  async function addStudent(){
+    if(!activeComp){setSingleMsg("❌ أنشئ مسابقة أولاً");return;}
+    const id=newId.trim(),name=newName.trim();
+    if(!id){setSingleMsg("❌ أدخل رقم المنافس");return;}
+    if(!name){setSingleMsg("❌ أدخل اسم المنافس");return;}
+    const next={...comps};next[activeComp]={...next[activeComp],roster:{...next[activeComp].roster,[id]:name}};
+    await dbSet("comps",next);setComps(next);
+    setNewId("");setNewName("");setSingleMsg(`✅ تم إضافة ${name}`);
+  }
+
+  async function importBulk(){
+    if(!activeComp){setBulkMsg("❌ أنشئ مسابقة أولاً");return;}
+    const lines=bulkInput.trim().split(/\n/);const result={};
+    lines.forEach(line=>{
+      const parts=line.trim().split(/[\t,،]+/);
+      if(parts.length<2)return;
+      const id=parts[0].trim(),name=parts.slice(1).join(" ").trim();
+      if(id&&name)result[id]=name;
+    });
+    if(!Object.keys(result).length){setBulkMsg("❌ لم يتم التعرف على أي منافس");return;}
+    const next={...comps};next[activeComp]={...next[activeComp],roster:{...next[activeComp].roster,...result}};
+    await dbSet("comps",next);setComps(next);
+    setBulkMsg(`✅ تم حفظ ${Object.keys(result).length} منافس`);setBulkInput("");
+  }
+
+  function handleFile(e){
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{setBulkInput(ev.target.result);setBulkMsg("تم تحميل الملف — راجع ثم اضغط استيراد");};
+    reader.readAsText(file,"UTF-8");
+  }
+
+  async function delStudent(id){
+    const next={...comps};const r={...next[activeComp].roster};delete r[id];
+    next[activeComp]={...next[activeComp],roster:r};
+    await dbSet("comps",next);setComps(next);
+  }
+
+  // Unlock a student's prediction (allow them to edit again)
+  async function unlockPrediction(studentName,matchKey){
+    const key="preds_"+activeComp;
+    const cur=await dbGet(key,{});
+    if(cur[studentName]&&cur[studentName].predictions&&cur[studentName].predictions[matchKey]){
+      cur[studentName].predictions[matchKey]={...cur[studentName].predictions[matchKey],locked:false};
+      await dbSet(key,cur);
+      setUnlockedNow(prev=>({...prev,[studentName+matchKey]:true}));
+      reloadComp(activeComp);
+    }
+  }
+
+  async function resetActualField(matchKey){
+    const next={...(allData.actual||{})};
+    delete next[matchKey];
+    await dbSet("actual",next);
+    reloadComp(activeComp);
+  }
+  async function saveActualField(matchKey,h,a){
+    const next={...actual,[matchKey]:{h,a}};
+    await dbSet("actual",next);
+    reloadComp(activeComp);
+  }
+
+
+  if(!unlocked){ return (
+    React.createElement('div', null
+      , React.createElement('h2', { style: S.secTitle,}, "⚙️ الإعدادات" )
+      , React.createElement('div', { style: {...S.card,maxWidth:440},}
+        , React.createElement('label', { style: S.lbl,}, "كلمة المرور" )
+        , React.createElement('div', { style: {display:"flex",gap:8,alignItems:"center"},}
+          , React.createElement('input', { type: showPass?"text":"password", style: {...S.inp,flex:1}, placeholder: "أدخل كلمة المرور..."  ,
+            value: pass, onChange: e=>{setPass(e.target.value);setPassErr("");},
+            onKeyDown: e=>e.key==="Enter"&&unlock(),})
+          , React.createElement('button', { style: S.eyeBtn, onClick: ()=>setShowPass(p=>!p),}, showPass?"🙈":"👁️")
+        )
+        , passErr&&React.createElement('div', { style: S.errBox,}, passErr)
+        , React.createElement('button', { style: S.btn, onClick: unlock,}, "دخول")
+
+      )
+    )
+  ); }
+
+  if(loading){ return (React.createElement('div', { style: {textAlign:"center",padding:60,color:"#88aacc"},}, "⏳ جاري التحميل..."  )); }
+
+  // Locked predictions grouped by student
+  const lockedByStudent={};
+  Object.entries(preds).forEach(([name,d])=>{
+    Object.entries(d.predictions||{}).forEach(([mk,p])=>{
+      if(p.locked){
+        if(!lockedByStudent[name])lockedByStudent[name]=[];
+        const m=SCHEDULE.find(s=>s.key===mk);
+        lockedByStudent[name].push({mk,p,m});
+      }
+    });
+  });
+
+  return (
+    React.createElement('div', null
+      , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24},}
+        , React.createElement('h2', { style: {...S.secTitle,marginBottom:0},}, "⚙️ الإعدادات" )
+        , React.createElement('button', { style: {...S.btn2,fontSize:12,padding:"7px 14px"}, onClick: lockAdmin,}, "🔒 قفل" )
+      )
+
+      /* COMPETITIONS */
+      , React.createElement('div', { style: S.sec,}
+        , React.createElement('h3', { style: S.secHead,}, "🏆 المسابقات" )
+        , React.createElement('p', { style: S.note,}, "أنشئ مسابقة لكل مجموعة (مثل: تلاميذ الفصل، أصدقاء الدوام). كل مسابقة لها قائمة منافسيها الخاصة. المنافس يدخل برقمه فيُعرف تلقائياً اسمه ومسابقته."                     )
+        , React.createElement('div', { style: {background:"rgba(0,212,255,0.05)",border:"1px solid rgba(0,212,255,0.15)",borderRadius:12,padding:20,marginBottom:16},}
+          , React.createElement('div', { style: {fontSize:15,fontWeight:700,color:"#ccd8f0",marginBottom:14},}, "➕ إنشاء مسابقة جديدة"   )
+          , React.createElement('div', { style: {display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"},}
+            , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:6,flex:1,minWidth:200},}
+              , React.createElement('label', { style: {fontSize:13,color:"#88aacc"},}, "اسم المسابقة" )
+              , React.createElement('input', { style: S.inp, placeholder: "تلاميذ الفصل" , value: newCompName, onChange: e=>{setNewCompName(e.target.value);setCompMsg("");}, onKeyDown: e=>e.key==="Enter"&&createComp(),})
+            )
+            , React.createElement('button', { style: S.btn, onClick: createComp,}, "إنشاء")
+          )
+          , compMsg&&React.createElement('div', { style: {...S.msgBox,marginTop:10,...(compMsg.startsWith("✅")?S.msgOk:S.msgErr)},}, compMsg)
+        )
+        , Object.keys(comps).length>0&&(
+          React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:8},}
+            , Object.entries(comps).map(([code,cinfo])=>(
+              React.createElement('div', { key: code, style: {borderRadius:9,background:activeComp===code?"rgba(0,212,255,0.1)":"rgba(255,255,255,0.03)",border:"1px solid",borderColor:activeComp===code?"rgba(0,212,255,0.3)":"transparent"},}
+                , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:10,padding:"10px 14px",cursor:"pointer"}, onClick: ()=>setActiveComp(code),}
+                  , React.createElement('span', { style: {fontSize:16},}, activeComp===code?"📂":"📁")
+                  , React.createElement('div', { style: {flex:1},}
+                    , React.createElement('div', { style: {fontWeight:700,fontSize:14},}, cinfo.name)
+                    , React.createElement('div', { style: {fontSize:11,color:"#556680"},}, Object.keys(cinfo.roster||{}).length, " منافس" )
+                  )
+                  , React.createElement('button', { style: S.delBtn, onClick: e=>{e.stopPropagation();setConfirmDel(code);},}, "🗑️")
+                )
+                , confirmDel===code&&(
+                  React.createElement('div', { style: {padding:"0 14px 12px",display:"flex",gap:8,alignItems:"center"},}
+                    , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ff9070"},}, "حذف «" , cinfo.name, "» وكل توقعاتها نهائياً؟"   )
+                    , React.createElement('button', { style: {...S.delBtn,padding:"5px 12px"}, onClick: e=>{e.stopPropagation();deleteComp(code);},}, "نعم، احذف" )
+                    , React.createElement('button', { style: {...S.btn2,fontSize:12,padding:"5px 12px"}, onClick: e=>{e.stopPropagation();setConfirmDel("");},}, "إلغاء")
+                  )
+                )
+              )
+            ))
+          )
+        )
+      )
+
+      , activeComp&&comp&&(React.createElement(React.Fragment, null
+        , React.createElement('div', { style: {textAlign:"center",marginBottom:16,fontSize:14,color:"#00d4ff"},}, "تُدار الآن مسابقة: "   , React.createElement('strong', null, comp.name), " (" , activeComp, ")")
+
+        /* ROSTER */
+        , React.createElement('div', { style: S.sec,}
+          , React.createElement('h3', { style: S.secHead,}, "📋 منافسو مسابقة «"   , comp.name, "»")
+          , React.createElement('div', { style: {background:"rgba(0,212,255,0.05)",border:"1px solid rgba(0,212,255,0.15)",borderRadius:12,padding:20,marginBottom:16},}
+            , React.createElement('div', { style: {fontSize:15,fontWeight:700,color:"#ccd8f0",marginBottom:14},}, "➕ إضافة منافس"  )
+            , React.createElement('div', { style: {display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"},}
+              , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:6,flex:1,minWidth:150},}
+                , React.createElement('label', { style: {fontSize:13,color:"#88aacc"},}, "رقم المنافس" )
+                , React.createElement('input', { style: S.inp, placeholder: "202210001", value: newId, onChange: e=>{setNewId(e.target.value);setSingleMsg("");}, onKeyDown: e=>e.key==="Enter"&&addStudent(),})
+              )
+              , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:6,flex:2,minWidth:180},}
+                , React.createElement('label', { style: {fontSize:13,color:"#88aacc"},}, "اسم المنافس" )
+                , React.createElement('input', { style: S.inp, placeholder: "أحمد محمد العمري"  , value: newName, onChange: e=>{setNewName(e.target.value);setSingleMsg("");}, onKeyDown: e=>e.key==="Enter"&&addStudent(),})
+              )
+              , React.createElement('button', { style: S.btn, onClick: addStudent,}, "إضافة")
+            )
+            , singleMsg&&React.createElement('div', { style: {...S.msgBox,marginTop:10,...(singleMsg.startsWith("✅")?S.msgOk:S.msgErr)},}, singleMsg)
+          )
+          , React.createElement('details', { style: {background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:"12px 16px"},}
+            , React.createElement('summary', { style: {fontSize:13,color:"#88aacc",cursor:"pointer",fontWeight:600},}, "📁 استيراد دفعة (CSV / نص)"     )
+            , React.createElement('div', { style: {marginTop:12},}
+              , React.createElement('p', { style: S.note,}, "الصيغة: رقم، اسم (سطر لكل منافس)"     )
+              , React.createElement('textarea', { style: S.ta, rows: 5, placeholder: "202210001، اسم المنافس\n...", value: bulkInput, onChange: e=>setBulkInput(e.target.value),})
+              , React.createElement('div', { style: {display:"flex",gap:10,flexWrap:"wrap",marginTop:8},}
+                , React.createElement('button', { style: S.btn2, onClick: ()=>fileRef.current.click(),}, "📁 رفع ملف"  )
+                , React.createElement('input', { type: "file", accept: ".csv,.txt", ref: fileRef, style: {display:"none"}, onChange: handleFile,})
+                , React.createElement('button', { style: S.btn, onClick: importBulk,}, "💾 استيراد" )
+              )
+              , bulkMsg&&React.createElement('div', { style: {...S.msgBox,marginTop:8,...(bulkMsg.startsWith("✅")?S.msgOk:S.msgErr)},}, bulkMsg)
+            )
+          )
+          , !!Object.keys(roster).length&&(
+            React.createElement('div', { style: {marginTop:16},}
+              , React.createElement('div', { style: {fontSize:14,fontWeight:700,color:"#ccd8f0",marginBottom:8},}, "المسجّلون (" , Object.keys(roster).length, ")")
+              , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:6,maxHeight:250,overflowY:"auto"},}
+                , Object.entries(roster).map(([id,name])=>(
+                  React.createElement('div', { key: id, style: {display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,0.03)",borderRadius:8},}
+                    , React.createElement('span', { style: {background:"rgba(0,212,255,0.12)",color:"#00d4ff",borderRadius:6,padding:"3px 10px",fontSize:12,fontFamily:"monospace",direction:"ltr"},}, id)
+                    , React.createElement('span', { style: {flex:1,fontSize:13,fontWeight:600},}, name)
+                    , React.createElement('button', { style: S.delBtn, onClick: ()=>delStudent(id),}, "🗑️")
+                  )
+                ))
+              )
+            )
+          )
+        )
+
+        /* UNLOCK REQUESTS */
+        , React.createElement('div', { style: S.sec,}
+          , React.createElement('h3', { style: S.secHead,}, "🔓 فتح قفل التوقعات المحفوظة"    )
+          , React.createElement('p', { style: S.note,}, "التوقعات المحفوظة مقفولة. اختر المنافس من القائمة ثم اضغط \"فتح\" بجانب التوقع ليتمكن من تعديله."              )
+          , Object.keys(lockedByStudent).length===0?React.createElement('div', { style: S.empty,}, "لا توجد توقعات محفوظة بعد"    ):(
+            React.createElement('details', { style: {background:"rgba(0,212,255,0.05)",borderRadius:12,border:"1px solid rgba(0,212,255,0.2)"},}
+              , React.createElement('summary', { style: {cursor:"pointer",padding:"14px 16px",fontSize:15,fontWeight:700,color:"#00d4ff",display:"flex",justifyContent:"space-between",alignItems:"center"},}
+                , React.createElement('span', null, "📋 عرض قائمة المنافسين ("    , Object.keys(lockedByStudent).length, ")")
+                , React.createElement('span', { style: {fontSize:18},}, "▾")
+              )
+              , React.createElement('div', { style: {padding:"4px 12px 14px",display:"flex",flexDirection:"column",gap:8},}
+                , Object.entries(lockedByStudent).map(([name,list])=>(
+                  React.createElement('details', { key: name, style: {background:"rgba(255,255,255,0.04)",borderRadius:9,border:"1px solid rgba(255,255,255,0.08)"},}
+                    , React.createElement('summary', { style: {cursor:"pointer",padding:"11px 14px",fontSize:14,fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"},}
+                      , React.createElement('span', null, "👤 " , name)
+                      , React.createElement('span', { style: {fontSize:11,color:"#88aacc",background:"rgba(0,212,255,0.1)",borderRadius:6,padding:"2px 8px"},}, list.length, " توقع ▾"  )
+                    )
+                    , React.createElement('div', { style: {padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:6},}
+                      , list.map(({mk,p,m})=>(
+                        React.createElement('div', { key: mk, style: {display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
+                          , React.createElement('span', { style: {fontSize:11,color:"#556680",minWidth:72},}, m?fmtDate(m.date).split(" ").slice(1).join(" "):"")
+                          , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0"},}, m?m.home:"", " " , React.createElement('span', { style: {color:"#00d4ff",fontWeight:700},}, p.h, "—", p.a), " " , m?m.away:"")
+                          , unlockedNow[name+mk]
+                            ? React.createElement('span', { style: {fontSize:11,padding:"5px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح" )
+                            : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"5px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "فتح")
+                        )
+                      ))
+                    )
+                  )
+                ))
+              )
+            )
+          )
+        )
+      ))
+
+      /* MANUAL RESULTS (group stage) */
+      , React.createElement('div', { style: S.sec,}
+        , React.createElement('h3', { style: S.secHead,}, "📊 إدخال النتائج يدوياً"   )
+        , React.createElement('p', { style: S.note,}, "أدخل النتيجة الفعلية لكل مباراة. الخانة الفارغة تُحسب صفراً. النتائج مشتركة بين كل المسابقات."             )
+        , React.createElement(ModeToggle, { mode: browseMode, onChange: setBrowseMode,})
+        , browseMode==="group"&&(
+          React.createElement('div', null
+            , React.createElement(GroupTabs, { active: activeGroup, onChange: setActiveGroup,})
+            , React.createElement('div', { style: S.grid,}
+              , getGroupMatches(GROUPS[activeGroup]).map(({home,away})=>{
+                const k=`${activeGroup}_${home}_${away}`;
+                return React.createElement(AdminMatchCard, { key: k, matchKey: k, home: home, away: away, actual: actual, onSave: saveActualField, onReset: resetActualField,});
+              })
+            )
+          )
+        )
+        , browseMode==="date"&&(
+          React.createElement(DateBlocks, { renderCard: m=>React.createElement(AdminMatchCard, { key: m.key, matchKey: m.key, home: m.home, away: m.away, actual: actual, onSave: saveActualField, onReset: resetActualField,}),})
+        )
+      )
+
+      /* KNOCKOUT MATCHES SETUP */
+      , React.createElement('div', { style: S.sec,}
+        , React.createElement('h3', { style: S.secHead,}, "🏟️ إعداد الأدوار الإقصائية"   )
+        , React.createElement('p', { style: S.note,}, "بعد انتهاء دور المجموعات، أدخل الفرق المتأهلة وتاريخ ووقت كل مباراة إقصائية. ستظهر للمنافسين تلقائياً ليتوقّعوها. اترك المباراة فارغة إن لم تتحدد بعد."                      )
+        , React.createElement('div', { style: {display:"flex",gap:6,flexWrap:"wrap",marginBottom:16},}
+          , KO_ROUNDS.map(r=>(
+            React.createElement('button', { key: r.id, style: {padding:"7px 14px",borderRadius:8,border:"1px solid",borderColor:koRound===r.id?"rgba(0,212,255,0.4)":"rgba(255,255,255,0.1)",background:koRound===r.id?"rgba(0,212,255,0.15)":"rgba(255,255,255,0.04)",color:koRound===r.id?"#00d4ff":"#88aacc",cursor:"pointer",fontSize:13,fontWeight:koRound===r.id?700:400}, onClick: ()=>setKoRound(r.id),}, r.name)
+          ))
+        )
+        , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:10},}
+          , (koEditMatches[koRound]||[]).map((m,idx)=>(
+            React.createElement('div', { key: idx, style: {background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:12},}
+              , React.createElement('div', { style: {fontSize:11,color:"#556680",marginBottom:8},}, "مباراة " , idx+1)
+              , React.createElement('div', { style: {display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"},}
+                , React.createElement('input', { list: "ko-teams", style: {...S.inp,flex:1,minWidth:120,fontSize:13,padding:"9px 12px"}, placeholder: "الفريق الأول" , value: m.home, onChange: e=>setKoField(koRound,idx,"home",e.target.value),})
+                , React.createElement('span', { style: {color:"#556680"},}, "ضد")
+                , React.createElement('input', { list: "ko-teams", style: {...S.inp,flex:1,minWidth:120,fontSize:13,padding:"9px 12px"}, placeholder: "الفريق الثاني" , value: m.away, onChange: e=>setKoField(koRound,idx,"away",e.target.value),})
+              )
+              , React.createElement('div', { style: {display:"flex",gap:8,flexWrap:"wrap",marginTop:8},}
+                , React.createElement('input', { type: "date", style: {...S.inp,fontSize:13,padding:"9px 12px",direction:"ltr"}, value: m.date, onChange: e=>setKoField(koRound,idx,"date",e.target.value),})
+                , React.createElement('input', { type: "time", style: {...S.inp,fontSize:13,padding:"9px 12px",direction:"ltr"}, value: m.kickoff, onChange: e=>setKoField(koRound,idx,"kickoff",e.target.value),})
+              )
+            )
+          ))
+        )
+        , React.createElement('datalist', { id: "ko-teams",}, Object.keys(FLAGS).map(t=>React.createElement('option', { key: t, value: t,})))
+        , React.createElement('button', { style: {...S.btn,marginTop:14}, onClick: saveKoMatches,}, "💾 حفظ مباريات "   , _optionalChain([KO_ROUNDS, 'access', _19 => _19.find, 'call', _20 => _20(r=>r.id===koRound), 'optionalAccess', _21 => _21.name]))
+        , koMsg&&React.createElement('div', { style: {...S.msgBox,marginTop:10,...S.msgOk},}, koMsg)
+      )
+
+      /* KNOCKOUT RESULTS */
+      , React.createElement('div', { style: S.sec,}
+        , React.createElement('h3', { style: S.secHead,}, "🎯 نتائج الأدوار الإقصائية"   )
+        , React.createElement('p', { style: S.note,}, "أدخل النتائج الفعلية للمباريات الإقصائية (الخانة الفارغة = صفر)."        )
+        , KO_ROUNDS.map(r=>{
+          const ms=(koEditMatches[r.id]||[]).map((m,idx)=>({...m,idx})).filter(m=>m.home&&m.away);
+          if(!ms.length)return null;
+          return (
+            React.createElement('div', { key: r.id, style: {marginBottom:18},}
+              , React.createElement('div', { style: {fontSize:14,fontWeight:700,color:"#00d4ff",marginBottom:10},}, r.name)
+              , React.createElement('div', { style: S.grid,}
+                , ms.map(m=>{
+                  const kk=koKey(r.id,m.idx);
+                  return React.createElement(AdminMatchCard, { key: kk, matchKey: kk, home: m.home, away: m.away, actual: actual, onSave: (mk,h,a,pen)=>saveKoResult(r.id,m.idx,h,a,pen), onReset: resetActualField, allowPen: true,});
+                })
+              )
+            )
+          );
+        })
+        , KO_ROUNDS.every(r=>!(koEditMatches[r.id]||[]).some(m=>m.home&&m.away))&&React.createElement('div', { style: S.empty,}, "أدخل مباريات الأدوار الإقصائية أولاً"    )
+      )
+
+      /* CHAMPION RESULT */
+      , React.createElement('div', { style: S.sec,}
+        , React.createElement('h3', { style: S.secHead,}, "👑 حامل اللقب الفعلي"   )
+        , React.createElement('p', { style: S.note,}, "عند انتهاء البطولة، حدّد البطل الفعلي لتُحتسب نقاط من توقّعه."         )
+        , (()=>{
+          const teams=new Set();
+          KO_ROUNDS.forEach(r=>(koEditMatches[r.id]||[]).forEach(m=>{if(m.home)teams.add(m.home);if(m.away)teams.add(m.away);}));
+          const list=Array.from(teams);
+          if(!list.length)return React.createElement('div', { style: S.empty,}, "أدخل الفرق المتأهلة أولاً"   );
+          return (
+            React.createElement('div', { style: {display:"flex",flexWrap:"wrap",gap:8},}
+              , list.map(t=>(
+                React.createElement('button', { key: t, onClick: ()=>saveChampionResult(t), style: {padding:"8px 14px",borderRadius:9,border:"1px solid",borderColor:champTeam===t?"rgba(255,215,0,0.5)":"rgba(255,255,255,0.1)",background:champTeam===t?"rgba(255,215,0,0.15)":"rgba(255,255,255,0.04)",color:champTeam===t?"#ffd700":"#ccd8f0",cursor:"pointer",fontSize:13,fontWeight:champTeam===t?700:500},}
+                  , FLAGS[t]||"🏳️", " " , t, champTeam===t?" ✅":""
+                )
+              ))
+            )
+          );
+        })()
+      )
+    )
+  );
+}
+
+// ===== MAIN APP =====
+function App(){
+  const [view,       setView]        = useState("home");
+  const [browseMode, setBrowseMode]  = useState("group");
+  const [activeGroup,setActiveGroup] = useState("A");
+  const [selStudent, setSelStudent]  = useState(null);
+
+  const [stId,     setStId]     = useState("");
+  const [stName,   setStName]   = useState("");
+  const [stComp,   setStComp]   = useState("");
+  const [idInput,  setIdInput]  = useState("");
+  const [loginErr, setLoginErr] = useState("");
+
+  const [loading,  setLoading]  = useState(true);
+  const [comps,    setComps]    = useState({});   // {code:{name,roster}}
+  const [actual,   setActual]   = useState({});
+  const [koMatches,setKoMatches]= useState({});   // {r32:[{home,away,date,kickoff}],...} shared
+  const [compPreds,setCompPreds]= useState({});   // preds for the active/viewed competition
+
+  // active competition for admin view
+  const [activeComp,setActiveComp]=useState("");
+
+  // ===== REAL-TIME SUBSCRIPTIONS (instant load + live cross-device sync) =====
+  // Global shared data: subscribe once on mount. UI shows instantly; data streams in.
+  useEffect(()=>{
+    const unsubComps=dbSubscribe("comps",{},val=>{
+      const cc=val&&typeof val==="object"?val:{};
+      setComps(cc);
+      setActiveComp(prev=>prev||Object.keys(cc)[0]||"");
+      setLoading(false);
+    });
+    const unsubActual=dbSubscribe("actual",{},val=>setActual(val&&typeof val==="object"?val:{}));
+    const unsubKo=dbSubscribe("koMatches",blankKO(),val=>setKoMatches(val&&typeof val==="object"?val:blankKO()));
+    // Safety: stop showing the boot loader even if comps is empty
+    const t=setTimeout(()=>setLoading(false),1500);
+    return ()=>{unsubComps();unsubActual();unsubKo();clearTimeout(t);};
+  },[]);
+
+  // Subscribe to the active competition's predictions (re-subscribes when context changes)
+  useEffect(()=>{
+    const code=stComp||activeComp;
+    if(!code){setCompPreds({});return;}
+    const unsub=dbSubscribe("preds_"+code,{},val=>setCompPreds(val&&typeof val==="object"?val:{}));
+    return ()=>unsub();
+  },[stComp,activeComp]);
+
+  // Kept for AdminPanel calls; with live listeners a manual reload is usually unnecessary,
+  // but this forces a one-shot refresh of the active competition's data on demand.
+  async function reloadComp(code){
+    if(!code)return;
+    const [p,a,cc,km]=await Promise.all([dbGet("preds_"+code,{}),dbGet("actual",{}),dbGet("comps",{}),dbGet("koMatches",blankKO())]);
+    setCompPreds(typeof p==="object"&&p!==null?p:{});
+    setActual(typeof a==="object"&&a!==null?a:{});
+    setComps(typeof cc==="object"&&cc!==null?cc:{});
+    setKoMatches(km&&typeof km==="object"?km:blankKO());
+  }
+
+  function handleLogin(){
+    const id=idInput.trim();
+    if(!id){setLoginErr("أدخل رقمك");return;}
+    // Search all competitions for this ID
+    let found=null;
+    Object.entries(comps).forEach(([code,c])=>{
+      if(c.roster&&c.roster[id])found={code,name:c.roster[id]};
+    });
+    if(!found){setLoginErr("الرقم غير موجود في أي مسابقة. تواصل مع المشرف.");return;}
+    setStId(id);setStName(found.name);setStComp(found.code);
+    setLoginErr("");setView("predict");
+  }
+  function handleLogout(){setStId("");setStName("");setStComp("");setIdInput("");setView("home");}
+
+  // Save a single prediction (locks it)
+  async function savePrediction(matchKey,h,a){
+    const code=stComp;
+    const cur=await dbGet("preds_"+code,{});
+    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+    cur[stName].predictions[matchKey]={h,a,locked:true};
+    cur[stName].savedAt=new Date().toISOString();
+    await dbSet("preds_"+code,cur);
+    setCompPreds({...cur});
+  }
+
+  // Knockout prediction (stored under same predictions object with KO_ key)
+  async function saveKoPrediction(koKeyId,h,a,pen){
+    const code=stComp;
+    const cur=await dbGet("preds_"+code,{});
+    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+    cur[stName].predictions[koKeyId]={h,a,pen:pen||"",locked:true};
+    cur[stName].savedAt=new Date().toISOString();
+    await dbSet("preds_"+code,cur);
+    setCompPreds({...cur});
+  }
+  // Champion pick (stored as champion field on competitor record)
+  async function saveChampion(team){
+    const code=stComp;
+    const cur=await dbGet("preds_"+code,{});
+    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+    cur[stName].champion={team,locked:true};
+    cur[stName].savedAt=new Date().toISOString();
+    await dbSet("preds_"+code,cur);
+    setCompPreds({...cur});
+  }
+
+  const myComp=comps[stComp];
+  const championActual=actual.CHAMPION&&actual.CHAMPION.team?actual.CHAMPION.team:null;
+  function totalScore(d){
+    let s=calcScore(d.predictions||{},actual);
+    // Penalty-shootout bonus (knockout only): +3 if predicted a draw and picked the correct shootout winner
+    const preds=d.predictions||{};
+    for(const k in actual){
+      if(k.indexOf("KO_")!==0)continue;
+      const ac=actual[k], p=preds[k];
+      if(!ac||ac.h==null||ac.h===""||!ac.pen)continue;          // actual was decided on penalties
+      if(!p||p.h==null||p.h==="")continue;
+      const pDraw=parseInt(norm(p.h))===parseInt(norm(p.a));
+      if(pDraw && p.pen && p.pen===ac.pen)s+=3;                 // correct shootout winner bonus
+    }
+    if(championActual&&d.champion&&d.champion.team===championActual)s+=3;
+    return s;
+  }
+  const leaderboard=Object.entries(compPreds).map(([name,d])=>({name,score:totalScore(d),savedAt:d.savedAt})).sort((a,b)=>b.score-a.score);
+  const isLoggedIn=!!stId;
+  const myPreds=_optionalChain([compPreds, 'access', _22 => _22[stName], 'optionalAccess', _23 => _23.predictions])||{};
+
+  if(loading){
+    return (
+      React.createElement('div', { style: {...S.root,display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"},}
+        , React.createElement('div', { style: {textAlign:"center"},}
+          , React.createElement('div', { style: {fontSize:48,marginBottom:16},}, "⚽")
+          , React.createElement('div', { style: {color:"#00d4ff",fontSize:18,fontWeight:700},}, "جاري تحميل البيانات..."  )
+        )
+      )
+    );
+  }
+
+  return (
+    React.createElement('div', { style: S.root,}
+      , React.createElement('div', { style: S.bg,}, [...Array(18)].map((_,i)=>React.createElement('div', { key: i, style: {...S.bubble,...bStyle(i)},})))
+
+      , React.createElement('header', { style: S.header,}
+        , React.createElement('div', { style: S.hi,}
+          , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:12},}
+            , React.createElement('span', { style: {fontSize:34,filter:"drop-shadow(0 0 12px rgba(0,212,255,0.6))"},}, "⚽")
+            , React.createElement('div', null, React.createElement('div', { style: {fontSize:18,fontWeight:800,color:"#00d4ff"},}, "كأس العالم 2026"  ), React.createElement('div', { style: {fontSize:11,color:"#88aacc",letterSpacing:2},}, "مسابقة التوقعات" ))
+          )
+          , React.createElement('nav', { style: {display:"flex",gap:6,flexWrap:"wrap"},}
+            , [["home","🏠 الرئيسية"],["predict","✏️ توقعاتي"],...(groupStageEnded()?[["knockout","🏟️ الإقصائيات"]]:[]),["leaderboard","🏆 الترتيب"],["stats","📊 إحصائيات"],["admin","⚙️ الإعدادات"]].map(([id,label])=>(
+              React.createElement('button', { key: id, style: {...S.navBtn,...(view===id?S.navBtnActive:{})}, onClick: ()=>setView(id),}, label)
+            ))
+          )
+          , isLoggedIn&&React.createElement('div', { style: S.userBadge,}, React.createElement('span', null, "👤 " , stName, myComp?` · ${myComp.name}`:""), React.createElement('button', { style: S.logoutBtn, onClick: handleLogout,}, "خروج"))
+        )
+      )
+
+      , React.createElement('main', { style: S.main,}
+
+        /* HOME */
+        , view==="home"&&(
+          React.createElement('div', { style: {maxWidth:640,margin:"0 auto",textAlign:"center",paddingTop:40},}
+            , React.createElement('div', { style: S.heroBadge,}, "🌍 USA · Canada · Mexico"     )
+            , React.createElement('h1', { style: S.heroTitle,}, "توقّع وتنافس!" )
+            , React.createElement('p', { style: {fontSize:15,color:"#88aacc",lineHeight:1.8,marginBottom:40},}, "أدخل رقمك للدخول إلى مسابقتك وتوقّع نتائج دور المجموعات."        , React.createElement('br', null), "نتيجة صحيحة = 3 نقاط  •  فائز صحيح = نقطة"         )
+            , isLoggedIn?(
+              React.createElement('div', { style: S.card,}
+                , React.createElement('div', { style: {textAlign:"center",fontSize:18,fontWeight:700},}, "مرحباً، " , stName, "! 👋" )
+                , myComp&&React.createElement('div', { style: {textAlign:"center",fontSize:13,color:"#88aacc"},}, "مسابقة: " , myComp.name)
+                , React.createElement('button', { style: S.btn, onClick: ()=>setView("predict"),}, "← تابع توقعاتك"  )
+              )
+            ):(
+              React.createElement('div', { style: S.card,}
+                , React.createElement('label', { style: S.lbl,}, "رقم المنافس" )
+                , React.createElement('input', { style: S.inp, placeholder: "أدخل رقمك..." , value: idInput,
+                  onChange: e=>{setIdInput(e.target.value);setLoginErr("");},
+                  onKeyDown: e=>e.key==="Enter"&&handleLogin(),})
+                , loginErr&&React.createElement('div', { style: S.errBox,}, loginErr)
+                , React.createElement('button', { style: S.btn, onClick: handleLogin,}, "دخول ←" )
+              )
+            )
+          )
+        )
+
+        /* PREDICT */
+        , view==="predict"&&(
+          !isLoggedIn?(
+            React.createElement('div', { style: {maxWidth:480,margin:"80px auto",textAlign:"center",display:"flex",flexDirection:"column",gap:20,alignItems:"center"},}
+              , React.createElement('div', { style: {fontSize:56},}, "🔒")
+              , React.createElement('div', { style: {fontSize:18,color:"#88aacc"},}, "يجب تسجيل الدخول أولاً"   )
+              , React.createElement('button', { style: S.btn, onClick: ()=>setView("home"),}, "→ صفحة الدخول"  )
+            )
+          ):(
+            React.createElement('div', null
+              , React.createElement('div', { style: {display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:16},}
+                , React.createElement('div', null
+                  , React.createElement('div', { style: {fontSize:26,fontWeight:800,color:"#fff"},}, "توقعاتي — "  , stName, " 👋" )
+                  , React.createElement('div', { style: {color:"#88aacc",marginTop:4},}, "كل توقع يُحفظ على حدة ويُقفل بعد الحفظ. الخانة الفارغة = صفر."           )
+                )
+              )
+              , React.createElement(DateBlocks, { renderCard: m=>React.createElement(PredictCard, { key: m.key, matchKey: m.key, home: m.home, away: m.away, pred: myPreds[m.key], actualRes: actual[m.key], onSave: savePrediction,}),})
+            )
+          )
+        )
+
+        /* LEADERBOARD */
+        , view==="leaderboard"&&(
+          React.createElement('div', { style: {maxWidth:700,margin:"0 auto"},}
+            , React.createElement('h2', { style: S.secTitle,}, "🏆 ترتيب "  , myComp?myComp.name:"المتصدرين")
+            , !isLoggedIn?React.createElement('div', { style: S.empty,}, "سجّل الدخول لرؤية ترتيب مسابقتك"    ):!leaderboard.length?React.createElement('div', { style: S.empty,}, "لا توجد توقعات بعد"   ):(
+              React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:10},}
+                , leaderboard.map((s,i)=>(
+                  React.createElement(LbRow, { key: s.name, s: s, i: i, isMe: s.name===stName, preds: compPreds, actual: actual,})
+                ))
+              )
+            )
+          )
+        )
+
+        /* STATS */
+        , view==="stats"&&(
+          React.createElement('div', null
+            , React.createElement('h2', { style: S.secTitle,}, "📊 إحصائيات "  , myComp?myComp.name:"")
+            , !isLoggedIn?React.createElement('div', { style: S.empty,}, "سجّل الدخول لرؤية الإحصائيات"   ):!Object.keys(compPreds).length?React.createElement('div', { style: S.empty,}, "لا توجد توقعات بعد"   ):(
+              (()=>{
+                const endedMatches=SCHEDULE.filter(m=>isMatchStarted(m.key));
+                const upcomingMatches=SCHEDULE.filter(m=>!isMatchStarted(m.key));
+                // group upcoming by date (keep existing date-block look)
+                const upByDate={};upcomingMatches.forEach(m=>{(upByDate[m.date]=upByDate[m.date]||[]).push(m);});
+                return (
+                  React.createElement('div', null
+                    , endedMatches.length>0&&(
+                      React.createElement('details', { style: {marginBottom:24,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12},}
+                        , React.createElement('summary', { style: {cursor:"pointer",padding:"14px 16px",fontSize:15,fontWeight:700,color:"#88aacc"},}, "🏁 المباريات المنتهية ("   , endedMatches.length, ") — اضغط للعرض"   )
+                        , React.createElement('div', { style: {padding:"4px 12px 14px"},}
+                          , Object.entries(upByDate).length===0&&null
+                          , React.createElement('div', { style: S.grid,}
+                            , endedMatches.map(m=>React.createElement(StatsCard, { key: m.key, matchKey: m.key, home: m.home, away: m.away, preds: compPreds, actual: actual,}))
+                          )
+                        )
+                      )
+                    )
+                    , upcomingMatches.length===0?React.createElement('div', { style: S.empty,}, "انتهت كل مباريات دور المجموعات"    ):(
+                      React.createElement('div', null
+                        , React.createElement('div', { style: {fontSize:14,fontWeight:700,color:"#00d4ff",marginBottom:14},}, "⏳ المباريات القادمة"  )
+                        , Object.entries(upByDate).map(([date,matches])=>(
+                          React.createElement('div', { key: date, style: {marginBottom:28},}
+                            , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:10,marginBottom:14,fontSize:15,fontWeight:700,color:"#ccd8f0"},}
+                              , React.createElement('span', null, "📅"), fmtDate(date), React.createElement('span', { style: {fontSize:12,color:"#00d4ff",background:"rgba(0,212,255,0.1)",border:"1px solid rgba(0,212,255,0.2)",borderRadius:6,padding:"2px 10px"},}, "المجموعة " , matches[0].group)
+                            )
+                            , React.createElement('div', { style: S.grid,}, matches.map(m=>React.createElement(StatsCard, { key: m.key, matchKey: m.key, home: m.home, away: m.away, preds: compPreds, actual: actual,})))
+                          )
+                        ))
+                      )
+                    )
+                  )
+                );
+              })()
+            )
+          )
+        )
+
+        /* KNOCKOUT */
+        , view==="knockout"&&(
+          !isLoggedIn?(
+            React.createElement('div', { style: {maxWidth:480,margin:"80px auto",textAlign:"center",display:"flex",flexDirection:"column",gap:20,alignItems:"center"},}
+              , React.createElement('div', { style: {fontSize:56},}, "🔒")
+              , React.createElement('div', { style: {fontSize:18,color:"#88aacc"},}, "سجّل الدخول لتوقّع الأدوار الإقصائية"    )
+              , React.createElement('button', { style: S.btn, onClick: ()=>setView("home"),}, "→ صفحة الدخول"  )
+            )
+          ):(
+            React.createElement('div', null
+              , React.createElement('h2', { style: S.secTitle,}, "🏟️ الأدوار الإقصائية"  )
+              , KO_ROUNDS.every(r=>!(koMatches[r.id]||[]).some(m=>m.home&&m.away))?(
+                React.createElement('div', { style: S.empty,}, "لم تُفتح الأدوار الإقصائية بعد. ستظهر هنا بعد أن يحدد المشرف الفرق المتأهلة."            )
+              ):(
+                React.createElement('div', null
+                  , KO_ROUNDS.map(r=>{
+                    const ms=(koMatches[r.id]||[]).map((m,idx)=>({...m,idx})).filter(m=>m.home&&m.away);
+                    if(!ms.length)return null;
+                    return (
+                      React.createElement('div', { key: r.id, style: {marginBottom:30},}
+                        , React.createElement('h3', { style: {fontSize:18,fontWeight:800,color:"#00d4ff",marginBottom:14},}, r.name)
+                        , React.createElement('div', { style: S.grid,}
+                          , ms.map(m=>{
+                            const kk=koKey(r.id,m.idx);
+                            return React.createElement(KoPredictCard, { key: kk, koKeyId: kk, home: m.home, away: m.away, date: m.date, kickoff: m.kickoff, pred: myPreds[kk], onSave: saveKoPrediction,});
+                          })
+                        )
+                      )
+                    );
+                  })
+                  /* CHAMPION */
+                  , React.createElement('div', { style: {...S.sec,marginTop:10},}
+                    , React.createElement('h3', { style: S.secHead,}, "👑 توقع حامل اللقب"   )
+                    , (()=>{
+                      const champPred=_optionalChain([compPreds, 'access', _24 => _24[stName], 'optionalAccess', _25 => _25.champion]);
+                      const champLocked=champPred&&champPred.locked;
+                      // candidate teams = all teams that appear in any KO match
+                      const teams=new Set();
+                      KO_ROUNDS.forEach(r=>(koMatches[r.id]||[]).forEach(m=>{if(m.home)teams.add(m.home);if(m.away)teams.add(m.away);}));
+                      const list=Array.from(teams);
+                      if(!list.length)return React.createElement('div', { style: S.empty,}, "سيظهر اختيار حامل اللقب بعد تحديد الفرق المتأهلة"       );
+                      if(champLocked)return React.createElement('div', { style: {textAlign:"center",fontSize:18,fontWeight:800,color:"#ffd700"},}, "👑 توقعك: "  , FLAGS[champPred.team]||"", " " , champPred.team, React.createElement('div', { style: {fontSize:11,color:"#00c864",marginTop:6},}, "✅ محفوظ — لا يمكن تغييره إلا بموافقة المشرف"        ));
+                      return React.createElement(ChampionPicker, { teams: list, onSave: saveChampion,});
+                    })()
+                  )
+                )
+              )
+            )
+          )
+        )
+
+        /* SETTINGS */
+        , view==="admin"&&(
+          React.createElement(AdminPanel, { comps: comps, setComps: setComps, activeComp: activeComp, setActiveComp: setActiveComp, allData: {preds:compPreds,actual}, reloadComp: reloadComp, koMatches: koMatches, setKoMatches: setKoMatches,})
+        )
+
+      )
+      , React.createElement('footer', { style: {textAlign:"center",padding:"22px",color:"#334455",fontSize:13,borderTop:"1px solid rgba(255,255,255,0.05)",position:"relative",zIndex:1},}, "⚽ مسابقة توقعات كأس العالم 2026"     )
+    )
+  );
+}
+
+function bStyle(i){const s=[60,100,40,80,50,120,30,90,70,45][i%10];return{width:s,height:s,left:`${(i*7+3)%100}%`,top:`${(i*11+5)%100}%`,animationDuration:`${8+(i%5)*3}s`,animationDelay:`${(i%4)*-2}s`};}
+
+const S={
+  root:{minHeight:"100vh",background:"linear-gradient(135deg,#0a0f1e 0%,#0d1f3c 50%,#0a1628 100%)",color:"#e8f0fe",fontFamily:"'Cairo','Segoe UI',sans-serif",direction:"rtl",position:"relative",overflow:"hidden"},
+  bg:{position:"fixed",inset:0,pointerEvents:"none",zIndex:0},
+  bubble:{position:"absolute",borderRadius:"50%",background:"radial-gradient(circle,rgba(0,212,255,0.08) 0%,transparent 70%)",animation:"float 10s ease-in-out infinite alternate"},
+  header:{position:"sticky",top:0,zIndex:100,background:"rgba(10,15,30,0.88)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(0,212,255,0.15)"},
+  hi:{maxWidth:1200,margin:"0 auto",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12},
+  navBtn:{padding:"7px 14px",borderRadius:8,border:"1px solid rgba(0,212,255,0.2)",background:"transparent",color:"#88aacc",cursor:"pointer",fontSize:13},
+  navBtnActive:{background:"rgba(0,212,255,0.15)",color:"#00d4ff",borderColor:"rgba(0,212,255,0.5)"},
+  userBadge:{display:"flex",alignItems:"center",gap:10,background:"rgba(0,212,255,0.08)",border:"1px solid rgba(0,212,255,0.2)",borderRadius:10,padding:"6px 14px",fontSize:13},
+  logoutBtn:{background:"rgba(255,80,80,0.12)",border:"1px solid rgba(255,80,80,0.25)",color:"#ff7070",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:12},
+  main:{position:"relative",zIndex:1,maxWidth:1200,margin:"0 auto",padding:"32px 20px",minHeight:"80vh"},
+  heroBadge:{display:"inline-block",padding:"6px 20px",borderRadius:30,background:"rgba(0,212,255,0.1)",border:"1px solid rgba(0,212,255,0.3)",color:"#00d4ff",fontSize:13,letterSpacing:2,marginBottom:20},
+  heroTitle:{fontSize:52,fontWeight:900,margin:"0 0 16px",background:"linear-gradient(135deg,#fff 0%,#00d4ff 50%,#ffd700 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",lineHeight:1.2},
+  card:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(0,212,255,0.15)",borderRadius:16,padding:32,display:"flex",flexDirection:"column",gap:14},
+  lbl:{fontSize:14,color:"#88aacc"},
+  inp:{padding:"13px 16px",borderRadius:10,border:"1px solid rgba(0,212,255,0.25)",background:"rgba(255,255,255,0.05)",color:"#fff",fontSize:16,outline:"none",textAlign:"right"},
+  errBox:{background:"rgba(255,60,60,0.12)",border:"1px solid rgba(255,60,60,0.3)",color:"#ff7070",borderRadius:8,padding:"10px 14px",fontSize:13},
+  btn:{padding:"13px 26px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#00d4ff,#0066ff)",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(0,212,255,0.3)"},
+  btn2:{padding:"11px 20px",borderRadius:10,border:"1px solid rgba(0,212,255,0.3)",background:"rgba(0,212,255,0.08)",color:"#00d4ff",fontSize:14,fontWeight:600,cursor:"pointer"},
+  eyeBtn:{padding:"0 14px",height:50,borderRadius:10,border:"1px solid rgba(0,212,255,0.2)",background:"rgba(0,212,255,0.06)",color:"#00d4ff",cursor:"pointer",fontSize:20,flexShrink:0},
+  saveBtn:{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(0,212,255,0.3)",background:"rgba(0,212,255,0.1)",color:"#00d4ff",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center"},
+  saveBtnSaved:{background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864"},
+  grid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14,marginBottom:20},
+  matchCard:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,padding:18,position:"relative"},
+  doneCard:{borderColor:"rgba(0,200,100,0.35)"},
+  autoTag:{position:"absolute",top:8,left:8,fontSize:10,background:"rgba(0,200,100,0.15)",color:"#00c864",borderRadius:5,padding:"2px 7px"},
+  matchTeams:{display:"flex",alignItems:"center",gap:8},
+  team:{flex:1,display:"flex",alignItems:"center",gap:7},
+  flag:{fontSize:22},
+  tname:{fontSize:13,fontWeight:600,color:"#ccd8f0"},
+  predLabel:{marginTop:9,textAlign:"center",fontSize:12,color:"#00d4ff",background:"rgba(0,212,255,0.08)",borderRadius:6,padding:"3px 10px"},
+  secTitle:{fontSize:28,fontWeight:800,marginBottom:24,color:"#fff"},
+  lbRow:{display:"flex",alignItems:"center",gap:16,padding:"16px 22px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12},
+  b3:{fontSize:11,background:"rgba(0,200,100,0.15)",color:"#00c864",borderRadius:6,padding:"2px 8px"},
+  b1:{fontSize:11,background:"rgba(255,200,0,0.12)",color:"#ffd700",borderRadius:6,padding:"2px 8px"},
+  cmSidebar:{width:220,flexShrink:0,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:14,display:"flex",flexDirection:"column",gap:5,position:"sticky",top:80},
+  cmBtn:{display:"flex",alignItems:"center",gap:7,padding:"9px 11px",borderRadius:9,cursor:"pointer",border:"1px solid transparent"},
+  cmBtnActive:{background:"rgba(0,212,255,0.12)",border:"1px solid rgba(0,212,255,0.3)"},
+  empty:{textAlign:"center",color:"#556680",padding:40,fontSize:16},
+  sec:{marginBottom:28,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:22},
+  secHead:{fontSize:17,fontWeight:700,marginBottom:12,color:"#ccd8f0"},
+  note:{fontSize:13,color:"#667788",marginBottom:12,lineHeight:1.6},
+  msgBox:{borderRadius:8,padding:"10px 14px",fontSize:13,background:"rgba(0,212,255,0.08)",color:"#88aacc"},
+  msgOk:{background:"rgba(0,200,100,0.12)",border:"1px solid rgba(0,200,100,0.3)",color:"#00c864"},
+  msgErr:{background:"rgba(255,60,60,0.12)",border:"1px solid rgba(255,60,60,0.3)",color:"#ff7070"},
+  ta:{padding:"12px 14px",borderRadius:10,border:"1px solid rgba(0,212,255,0.2)",background:"rgba(255,255,255,0.04)",color:"#ccd8f0",fontSize:14,outline:"none",resize:"vertical",direction:"rtl",width:"100%",boxSizing:"border-box"},
+  delBtn:{padding:"3px 9px",background:"rgba(255,60,60,0.1)",border:"1px solid rgba(255,60,60,0.2)",borderRadius:6,color:"#ff6060",cursor:"pointer",fontSize:13},
+};
+
+// ===== MOUNT =====
+function mountApp(){
+  try{
+    if(typeof initFirebase==="function") initFirebase();
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+    var boot=document.getElementById("boot");
+    if(boot) boot.style.display="none";
+  }catch(err){
+    var boot=document.getElementById("boot");
+    if(boot){
+      boot.innerHTML='<div style="max-width:340px;"><div style="font-size:48px;margin-bottom:14px;">⚠️</div>'
+        +'<div style="font-size:15px;color:#ff8080;line-height:1.7;margin-bottom:16px;">حدث خطأ: '+err.message+'</div>'
+        +'<button onclick="location.reload()" style="padding:12px 24px;border:none;border-radius:10px;background:#00d4ff;color:#001;font-weight:700;font-size:15px;cursor:pointer;">🔄 إعادة المحاولة</button></div>';
+    }
+    console.error(err);
+  }
+}
+// Scripts are synchronous, so React/Firebase are ready here. Mount on DOM ready.
+if(document.readyState==="loading"){
+  document.addEventListener("DOMContentLoaded",mountApp);
+}else{
+  mountApp();
+}
+</script>
+</body>
+</html>
