@@ -523,36 +523,26 @@ function AdminMatchCard({matchKey,home,away,actual,onSave,onReset,allowPen}){
 
 function LbRow({s,i,isMe,preds,actual}){
   const [open,setOpen]=useState(false);
-  // Compute breakdown + collect short match labels per category
   let exact=0,winner=0,wrong=0;
-  const exactL=[],winnerL=[],wrongL=[];
+  const rows=[];
   const predObj=_optionalChain([preds, 'access', _10 => _10[s.name], 'optionalAccess', _11 => _11.predictions])||{};
-  function shortLabel(k,p,ac){
-    // find teams: group match in SCHEDULE, else knockout (KO_) — use stored names if available
-    const sm=SCHEDULE.find(x=>x.key===k);
-    let home=sm?sm.home:"",away=sm?sm.away:"";
-    const nm=(t)=>t||"";
-    return `${nm(home)} ${p.h}-${p.a}${ac?` (الفعلي ${ac.h}-${ac.a})`:""} ${nm(away)}`.trim();
-  }
   Object.keys(actual).forEach(k=>{
     const p=predObj[k],ac=actual[k];
     if(!p||p.h==null||p.h==="")return;
+    if(!ac||ac.h==null||ac.h==="")return;
     const r=predResult(p,ac);
-    if(r==="exact"){exact++;exactL.push(shortLabel(k,p,ac));}
-    else if(r==="winner"){winner++;winnerL.push(shortLabel(k,p,ac));}
-    else if(r==="wrong"){wrong++;wrongL.push(shortLabel(k,p,ac));}
+    const sm=SCHEDULE.find(x=>x.key===k);
+    const home=sm?sm.home:"",away=sm?sm.away:"";
+    if(r==="exact")exact++;else if(r==="winner")winner++;else if(r==="wrong")wrong++;
+    rows.push({home,away,ph:p.h,pa:p.a,ah:ac.h,aa:ac.a,r});
   });
+  // order: exact, winner, wrong
+  const order={exact:0,winner:1,wrong:2};
+  rows.sort((x,y)=>order[x.r]-order[y.r]);
   const hasResults=Object.keys(actual).length>0;
   const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
   const rowBg=i===0?{background:"rgba(255,215,0,0.1)",border:"1px solid rgba(255,215,0,0.3)"}:i===1?{background:"rgba(192,192,192,0.08)",border:"1px solid rgba(192,192,192,0.25)"}:i===2?{background:"rgba(205,127,50,0.08)",border:"1px solid rgba(205,127,50,0.25)"}:{};
-  const listBox=(title,arr,color)=>arr.length>0&&(
-    React.createElement('div', { style: {marginTop:8},}
-      , React.createElement('div', { style: {fontSize:11,fontWeight:700,color,marginBottom:4},}, title, " (" , arr.length, ")")
-      , React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:3},}
-        , arr.map((t,idx)=>React.createElement('div', { key: idx, style: {fontSize:11,color:"#ccd8f0",background:"rgba(0,0,0,0.18)",borderRadius:5,padding:"3px 8px"},}, t))
-      )
-    )
-  );
+  const rcolor=(r)=>r==="exact"?{bg:"rgba(0,200,100,0.13)",bd:"rgba(0,200,100,0.35)",tx:"#5ee9a4"}:r==="winner"?{bg:"rgba(255,200,0,0.1)",bd:"rgba(255,200,0,0.35)",tx:"#ffd700"}:{bg:"rgba(255,60,60,0.1)",bd:"rgba(255,60,60,0.3)",tx:"#ff8080"};
   return (
     React.createElement('div', { style: {...S.lbRow,flexDirection:"column",alignItems:"stretch",...rowBg,...(isMe?{boxShadow:"0 0 0 2px rgba(0,212,255,0.4)"}:{}),cursor:"pointer"}, onClick: ()=>setOpen(o=>!o),}
       , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:16},}
@@ -565,16 +555,28 @@ function LbRow({s,i,isMe,preds,actual}){
       )
       , open&&(
         React.createElement('div', { style: {marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.08)"},}
-          , React.createElement('div', { style: {display:"flex",gap:10,flexWrap:"wrap",justifyContent:"space-around",marginBottom:6},}
+          , React.createElement('div', { style: {display:"flex",gap:10,flexWrap:"wrap",justifyContent:"space-around",marginBottom:10},}
             , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#00c864"},}, exact), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "نتيجة صحيحة (3)"  ))
             , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#ffd700"},}, winner), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "فائز صحيح (1)"  ))
             , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#ff6060"},}, wrong), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "توقع خاطئ (0)"  ))
             , React.createElement('div', { style: {textAlign:"center"},}, React.createElement('div', { style: {fontSize:22,fontWeight:900,color:"#00d4ff"},}, s.score), React.createElement('div', { style: {fontSize:11,color:"#88aacc"},}, "المجموع"))
           )
-          , !hasResults&&React.createElement('div', { style: {fontSize:11,color:"#556680",textAlign:"center"},}, "لا توجد نتائج مُدخلة بعد"    )
-          , listBox("🎯 نتائج صحيحة",exactL,"#00c864")
-          , listBox("✅ فائز صحيح",winnerL,"#ffd700")
-          , listBox("❌ توقعات خاطئة",wrongL,"#ff6060")
+          /* Color legend */
+          , React.createElement('div', { style: {display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center",marginBottom:10,fontSize:10},}
+            , React.createElement('span', { style: {color:"#5ee9a4"},}, "🟢 نتيجة صحيحة"  )
+            , React.createElement('span', { style: {color:"#ffd700"},}, "🟡 فائز صحيح"  )
+            , React.createElement('span', { style: {color:"#ff8080"},}, "🔴 توقع خاطئ"  )
+          )
+          , !hasResults||rows.length===0?React.createElement('div', { style: {fontSize:11,color:"#556680",textAlign:"center"},}, "لا توجد نتائج مُدخلة بعد"    ):(
+            React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:5},}
+              , rows.map((m,idx)=>{const c=rcolor(m.r);return (
+                React.createElement('div', { key: idx, style: {display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,fontSize:12,background:c.bg,border:`1px solid ${c.bd}`,borderRadius:7,padding:"6px 10px"},}
+                  , React.createElement('span', { style: {color:"#e8f0fe",fontWeight:600},}, m.home, " × "  , m.away)
+                  , React.createElement('span', { style: {color:c.tx,fontWeight:700,whiteSpace:"nowrap"},}, "توقعك " , m.ph, "-", m.pa, " | الفعلي "   , m.ah, "-", m.aa)
+                )
+              );})
+            )
+          )
         )
       )
     )
