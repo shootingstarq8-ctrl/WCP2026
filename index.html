@@ -698,25 +698,26 @@ function ChampionPicker({teams,onSave}){
 // Admin inline editor for a competitor's prediction (works even after match lock/end)
 function AdminPredEditor({name,mk,p,m,onSave}){
   const [editing,setEditing]=useState(false);
-  const [h,setH]=useState(_nullishCoalesce(p.h, () => ("")));
-  const [a,setA]=useState(_nullishCoalesce(p.a, () => ("")));
+  const has=p&&p.h!=null&&p.h!=="";
+  const [h,setH]=useState(has?p.h:"");
+  const [a,setA]=useState(has?p.a:"");
   const [flash,setFlash]=useState(false);
   const SI={width:40,height:38,borderRadius:7,border:"1px solid rgba(0,212,255,0.3)",background:"rgba(0,212,255,0.06)",color:"#00d4ff",fontSize:16,fontWeight:800,textAlign:"center",outline:"none"};
   async function save(){await onSave(name,mk,norm(h),norm(a));setFlash(true);setEditing(false);setTimeout(()=>setFlash(false),1500);}
   return (
     React.createElement('div', { style: {display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7,flexWrap:"wrap"},}
       , React.createElement('span', { style: {fontSize:11,color:"#556680",minWidth:64},}, m?fmtDate(m.date).split(" ").slice(1).join(" "):"")
-      , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0",minWidth:120},}, m?m.home:"", " " , !editing&&React.createElement('span', { style: {color:"#00d4ff",fontWeight:700},}, p.h, "—", p.a), " " , m?m.away:"")
+      , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0",minWidth:120},}, m?m.home:"", " " , !editing&&(has?React.createElement('span', { style: {color:"#00d4ff",fontWeight:700},}, p.h, "—", p.a):React.createElement('span', { style: {color:"#667",fontStyle:"italic"},}, "لم يتوقّع" )), " " , m?m.away:"")
       , editing?(
         React.createElement('div', { style: {display:"flex",alignItems:"center",gap:6},}
-          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: h, onChange: e=>setH(toWestern(e.target.value)),})
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: h, placeholder: "0", onChange: e=>setH(toWestern(e.target.value)),})
           , React.createElement('span', { style: {color:"#556680"},}, "—")
-          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: a, onChange: e=>setA(toWestern(e.target.value)),})
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: a, placeholder: "0", onChange: e=>setA(toWestern(e.target.value)),})
           , React.createElement('button', { style: {...S.btn,fontSize:11,padding:"6px 10px"}, onClick: save,}, "حفظ")
-          , React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"6px 10px"}, onClick: ()=>{setEditing(false);setH(_nullishCoalesce(p.h, () => ("")));setA(_nullishCoalesce(p.a, () => ("")));},}, "إلغاء")
+          , React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"6px 10px"}, onClick: ()=>{setEditing(false);setH(has?p.h:"");setA(has?p.a:"");},}, "إلغاء")
         )
       ):(
-        React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"5px 12px",...(flash?{background:"rgba(0,200,100,0.15)",borderColor:"rgba(0,200,100,0.4)",color:"#00c864"}:{})}, onClick: ()=>{setH(_nullishCoalesce(p.h, () => ("")));setA(_nullishCoalesce(p.a, () => ("")));setEditing(true);},}, flash?"✅ عُدّلت":"✏️ تعديل")
+        React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"5px 12px",...(flash?{background:"rgba(0,200,100,0.15)",borderColor:"rgba(0,200,100,0.4)",color:"#00c864"}:{})}, onClick: ()=>{setH(has?p.h:"");setA(has?p.a:"");setEditing(true);},}, flash?"✅ حُفظت":(has?"✏️ تعديل":"➕ إدخال"))
       )
     )
   );
@@ -867,12 +868,13 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
   async function adminEditPrediction(studentName,matchKey,h,a){
     const key="preds_"+activeComp;
     const cur=await dbGet(key,{});
-    if(cur[studentName]&&cur[studentName].predictions&&cur[studentName].predictions[matchKey]){
-      const prev=cur[studentName].predictions[matchKey];
-      cur[studentName].predictions[matchKey]={...prev,h,a,locked:true};
-      await dbSet(key,cur);
-      reloadComp(activeComp);
-    }
+    if(!cur[studentName])cur[studentName]={predictions:{},savedAt:new Date().toISOString()};
+    if(!cur[studentName].predictions)cur[studentName].predictions={};
+    const prev=cur[studentName].predictions[matchKey]||{};
+    cur[studentName].predictions[matchKey]={...prev,h,a,locked:true};
+    cur[studentName].savedAt=cur[studentName].savedAt||new Date().toISOString();
+    await dbSet(key,cur);
+    reloadComp(activeComp);
   }
 
   async function resetActualField(matchKey){
@@ -1017,37 +1019,47 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
           )
         )
 
-        /* UNLOCK REQUESTS */
+        /* EDIT / UNLOCK PREDICTIONS */
         , React.createElement('div', { style: S.sec,}
-          , React.createElement('h3', { style: S.secHead,}, "🔓 فتح قفل التوقعات المحفوظة"    )
-          , React.createElement('p', { style: S.note,}, "اختر المنافس من القائمة. يمكنك تعديل أي توقع مباشرةً (حتى بعد انتهاء المباراة) بزر «تعديل»، أو فتح القفل ليعدّله المنافس بنفسه."                    )
-          , Object.keys(lockedByStudent).length===0?React.createElement('div', { style: S.empty,}, "لا توجد توقعات محفوظة بعد"    ):(
+          , React.createElement('h3', { style: S.secHead,}, "✏️ تعديل توقعات المنافسين"   )
+          , React.createElement('p', { style: S.note,}, "اختر المنافس ثم عدّل أو أدخِل أي توقع مباشرةً — حتى لو لم يتوقّع المباراة أصلاً، أو بعد انتهائها. أو افتح القفل ليعدّله المنافس بنفسه."                        )
+          , Object.keys(roster).length===0?React.createElement('div', { style: S.empty,}, "لا يوجد منافسون في هذه المسابقة"     ):(
             React.createElement('details', { style: {background:"rgba(0,212,255,0.05)",borderRadius:12,border:"1px solid rgba(0,212,255,0.2)"},}
               , React.createElement('summary', { style: {cursor:"pointer",padding:"14px 16px",fontSize:15,fontWeight:700,color:"#00d4ff",display:"flex",justifyContent:"space-between",alignItems:"center"},}
-                , React.createElement('span', null, "📋 عرض قائمة المنافسين ("    , Object.keys(lockedByStudent).length, ")")
+                , React.createElement('span', null, "📋 عرض قائمة المنافسين ("    , Object.keys(roster).length, ")")
                 , React.createElement('span', { style: {fontSize:18},}, "▾")
               )
               , React.createElement('div', { style: {padding:"4px 12px 14px",display:"flex",flexDirection:"column",gap:8},}
-                , Object.entries(lockedByStudent).map(([name,list])=>(
-                  React.createElement('details', { key: name, style: {background:"rgba(255,255,255,0.04)",borderRadius:9,border:"1px solid rgba(255,255,255,0.08)"},}
-                    , React.createElement('summary', { style: {cursor:"pointer",padding:"11px 14px",fontSize:14,fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"},}
-                      , React.createElement('span', null, "👤 " , name)
-                      , React.createElement('span', { style: {fontSize:11,color:"#88aacc",background:"rgba(0,212,255,0.1)",borderRadius:6,padding:"2px 8px"},}, list.length, " توقع ▾"  )
+                , Object.values(roster).map((name)=>{
+                  const userPreds=(preds[name]&&preds[name].predictions)||{};
+                  const predCount=Object.keys(userPreds).filter(k=>userPreds[k]&&userPreds[k].h!=null&&userPreds[k].h!=="").length;
+                  return (
+                    React.createElement('details', { key: name, style: {background:"rgba(255,255,255,0.04)",borderRadius:9,border:"1px solid rgba(255,255,255,0.08)"},}
+                      , React.createElement('summary', { style: {cursor:"pointer",padding:"11px 14px",fontSize:14,fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"},}
+                        , React.createElement('span', null, "👤 " , name)
+                        , React.createElement('span', { style: {fontSize:11,color:"#88aacc",background:"rgba(0,212,255,0.1)",borderRadius:6,padding:"2px 8px"},}, predCount, " توقع ▾"  )
+                      )
+                      , React.createElement('div', { style: {padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:6},}
+                        , SCHEDULE.map((m)=>{
+                          const mk=m.key; const p=userPreds[mk]||{};
+                          const hasPred=p&&p.h!=null&&p.h!=="";
+                          return (
+                            React.createElement('div', { key: mk, style: {display:"flex",flexDirection:"column",gap:6,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
+                              , React.createElement(AdminPredEditor, { name: name, mk: mk, p: p, m: m, onSave: adminEditPrediction,})
+                              , hasPred&&(
+                                React.createElement('div', { style: {display:"flex",justifyContent:"flex-end"},}
+                                  , unlockedNow[name+mk]
+                                    ? React.createElement('span', { style: {fontSize:11,padding:"4px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح للمنافس"  )
+                                    : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"4px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "🔓 فتح للمنافس"  )
+                                )
+                              )
+                            )
+                          );
+                        })
+                      )
                     )
-                    , React.createElement('div', { style: {padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:6},}
-                      , list.map(({mk,p,m})=>(
-                        React.createElement('div', { key: mk, style: {display:"flex",flexDirection:"column",gap:6,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
-                          , React.createElement(AdminPredEditor, { name: name, mk: mk, p: p, m: m, onSave: adminEditPrediction,})
-                          , React.createElement('div', { style: {display:"flex",justifyContent:"flex-end"},}
-                            , unlockedNow[name+mk]
-                              ? React.createElement('span', { style: {fontSize:11,padding:"4px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح للمنافس"  )
-                              : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"4px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "🔓 فتح للمنافس"  )
-                          )
-                        )
-                      ))
-                    )
-                  )
-                ))
+                  );
+                })
               )
             )
           )
