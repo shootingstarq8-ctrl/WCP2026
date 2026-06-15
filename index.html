@@ -60,18 +60,35 @@ try{
 function lsGet(key,fallback){try{const v=localStorage.getItem("wc26_"+key);return v?JSON.parse(v):fallback;}catch (e2){return fallback;}}
 function lsSet(key,value){try{localStorage.setItem("wc26_"+key,JSON.stringify(value));}catch (e3){}}
 
+// Firebase RTDB forbids . # $ [ ] / in KEYS. Competitor names/match keys may contain them,
+// which makes the whole write fail. We percent-encode forbidden chars in OBJECT KEYS only,
+// transparently, and decode on read so the rest of the app is unaffected.
+function encKey(k){return String(k).replace(/[.#$\[\]\/]/g,c=>"~"+c.charCodeAt(0).toString(16)+"~");}
+function decKey(k){return String(k).replace(/~([0-9a-f]{2})~/g,(_,h)=>String.fromCharCode(parseInt(h,16)));}
+function encodeKeys(v){
+  if(Array.isArray(v))return v.map(encodeKeys);
+  if(v&&typeof v==="object"){const o={};for(const k in v)o[encKey(k)]=encodeKeys(v[k]);return o;}
+  return v;
+}
+function decodeKeys(v){
+  if(Array.isArray(v))return v.map(decodeKeys);
+  if(v&&typeof v==="object"){const o={};for(const k in v)o[decKey(k)]=decodeKeys(v[k]);return o;}
+  return v;
+}
+
 async function dbGet(key,fallback){
   if(FB_OK){
     try{
       const snap=await FB_DB.ref("wc26/"+key).get();
-      return snap.exists()?snap.val():fallback;
+      return snap.exists()?decodeKeys(snap.val()):fallback;
     }catch(e){ return lsGet(key,fallback); }
   }
   return lsGet(key,fallback);
 }
 async function dbSet(key,value){
   if(FB_OK){
-    try{ await FB_DB.ref("wc26/"+key).set(value); return; }catch(e){ /* fall through */ }
+    await FB_DB.ref("wc26/"+key).set(encodeKeys(value)); // let errors propagate so callers can react
+    return;
   }
   lsSet(key,value);
 }
@@ -79,7 +96,7 @@ async function dbSet(key,value){
 function dbSubscribe(key,fallback,cb){
   if(FB_OK){
     const ref=FB_DB.ref("wc26/"+key);
-    const handler=ref.on("value",snap=>{ cb(snap.exists()?snap.val():fallback); });
+    const handler=ref.on("value",snap=>{ cb(snap.exists()?decodeKeys(snap.val()):fallback); });
     return ()=>ref.off("value",handler);
   }else{
     cb(lsGet(key,fallback));
@@ -678,6 +695,33 @@ function ChampionPicker({teams,onSave}){
   );
 }
 
+// Admin inline editor for a competitor's prediction (works even after match lock/end)
+function AdminPredEditor({name,mk,p,m,onSave}){
+  const [editing,setEditing]=useState(false);
+  const [h,setH]=useState(_nullishCoalesce(p.h, () => ("")));
+  const [a,setA]=useState(_nullishCoalesce(p.a, () => ("")));
+  const [flash,setFlash]=useState(false);
+  const SI={width:40,height:38,borderRadius:7,border:"1px solid rgba(0,212,255,0.3)",background:"rgba(0,212,255,0.06)",color:"#00d4ff",fontSize:16,fontWeight:800,textAlign:"center",outline:"none"};
+  async function save(){await onSave(name,mk,norm(h),norm(a));setFlash(true);setEditing(false);setTimeout(()=>setFlash(false),1500);}
+  return (
+    React.createElement('div', { style: {display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7,flexWrap:"wrap"},}
+      , React.createElement('span', { style: {fontSize:11,color:"#556680",minWidth:64},}, m?fmtDate(m.date).split(" ").slice(1).join(" "):"")
+      , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0",minWidth:120},}, m?m.home:"", " " , !editing&&React.createElement('span', { style: {color:"#00d4ff",fontWeight:700},}, p.h, "—", p.a), " " , m?m.away:"")
+      , editing?(
+        React.createElement('div', { style: {display:"flex",alignItems:"center",gap:6},}
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: h, onChange: e=>setH(toWestern(e.target.value)),})
+          , React.createElement('span', { style: {color:"#556680"},}, "—")
+          , React.createElement('input', { type: "text", inputMode: "numeric", style: SI, value: a, onChange: e=>setA(toWestern(e.target.value)),})
+          , React.createElement('button', { style: {...S.btn,fontSize:11,padding:"6px 10px"}, onClick: save,}, "حفظ")
+          , React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"6px 10px"}, onClick: ()=>{setEditing(false);setH(_nullishCoalesce(p.h, () => ("")));setA(_nullishCoalesce(p.a, () => ("")));},}, "إلغاء")
+        )
+      ):(
+        React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"5px 12px",...(flash?{background:"rgba(0,200,100,0.15)",borderColor:"rgba(0,200,100,0.4)",color:"#00c864"}:{})}, onClick: ()=>{setH(_nullishCoalesce(p.h, () => ("")));setA(_nullishCoalesce(p.a, () => ("")));setEditing(true);},}, flash?"✅ عُدّلت":"✏️ تعديل")
+      )
+    )
+  );
+}
+
 // ===== ADMIN PANEL =====
 function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,koMatches,setKoMatches}){
   const ADMIN_PASS="teacher2026";
@@ -815,6 +859,18 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
       cur[studentName].predictions[matchKey]={...cur[studentName].predictions[matchKey],locked:false};
       await dbSet(key,cur);
       setUnlockedNow(prev=>({...prev,[studentName+matchKey]:true}));
+      reloadComp(activeComp);
+    }
+  }
+
+  // Admin directly edits a competitor's prediction score (keeps it locked). Works after match lock/end.
+  async function adminEditPrediction(studentName,matchKey,h,a){
+    const key="preds_"+activeComp;
+    const cur=await dbGet(key,{});
+    if(cur[studentName]&&cur[studentName].predictions&&cur[studentName].predictions[matchKey]){
+      const prev=cur[studentName].predictions[matchKey];
+      cur[studentName].predictions[matchKey]={...prev,h,a,locked:true};
+      await dbSet(key,cur);
       reloadComp(activeComp);
     }
   }
@@ -964,7 +1020,7 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
         /* UNLOCK REQUESTS */
         , React.createElement('div', { style: S.sec,}
           , React.createElement('h3', { style: S.secHead,}, "🔓 فتح قفل التوقعات المحفوظة"    )
-          , React.createElement('p', { style: S.note,}, "التوقعات المحفوظة مقفولة. اختر المنافس من القائمة ثم اضغط \"فتح\" بجانب التوقع ليتمكن من تعديله."              )
+          , React.createElement('p', { style: S.note,}, "اختر المنافس من القائمة. يمكنك تعديل أي توقع مباشرةً (حتى بعد انتهاء المباراة) بزر «تعديل»، أو فتح القفل ليعدّله المنافس بنفسه."                    )
           , Object.keys(lockedByStudent).length===0?React.createElement('div', { style: S.empty,}, "لا توجد توقعات محفوظة بعد"    ):(
             React.createElement('details', { style: {background:"rgba(0,212,255,0.05)",borderRadius:12,border:"1px solid rgba(0,212,255,0.2)"},}
               , React.createElement('summary', { style: {cursor:"pointer",padding:"14px 16px",fontSize:15,fontWeight:700,color:"#00d4ff",display:"flex",justifyContent:"space-between",alignItems:"center"},}
@@ -980,12 +1036,13 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
                     )
                     , React.createElement('div', { style: {padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:6},}
                       , list.map(({mk,p,m})=>(
-                        React.createElement('div', { key: mk, style: {display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
-                          , React.createElement('span', { style: {fontSize:11,color:"#556680",minWidth:72},}, m?fmtDate(m.date).split(" ").slice(1).join(" "):"")
-                          , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0"},}, m?m.home:"", " " , React.createElement('span', { style: {color:"#00d4ff",fontWeight:700},}, p.h, "—", p.a), " " , m?m.away:"")
-                          , unlockedNow[name+mk]
-                            ? React.createElement('span', { style: {fontSize:11,padding:"5px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح" )
-                            : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"5px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "فتح")
+                        React.createElement('div', { key: mk, style: {display:"flex",flexDirection:"column",gap:6,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
+                          , React.createElement(AdminPredEditor, { name: name, mk: mk, p: p, m: m, onSave: adminEditPrediction,})
+                          , React.createElement('div', { style: {display:"flex",justifyContent:"flex-end"},}
+                            , unlockedNow[name+mk]
+                              ? React.createElement('span', { style: {fontSize:11,padding:"4px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح للمنافس"  )
+                              : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"4px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "🔓 فتح للمنافس"  )
+                          )
                         )
                       ))
                     )
@@ -1185,33 +1242,45 @@ function App(){
   // Save a single prediction (locks it)
   async function savePrediction(matchKey,h,a){
     const code=stComp;
-    const cur=await dbGet("preds_"+code,{});
-    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-    cur[stName].predictions[matchKey]={h,a,locked:true};
-    cur[stName].savedAt=new Date().toISOString();
-    await dbSet("preds_"+code,cur);
-    setCompPreds({...cur});
+    try{
+      const cur=await dbGet("preds_"+code,{});
+      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+      cur[stName].predictions[matchKey]={h,a,locked:true};
+      cur[stName].savedAt=new Date().toISOString();
+      await dbSet("preds_"+code,cur);
+      setCompPreds({...cur});
+    }catch(err){
+      alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
+    }
   }
 
   // Knockout prediction (stored under same predictions object with KO_ key)
   async function saveKoPrediction(koKeyId,h,a,pen){
     const code=stComp;
-    const cur=await dbGet("preds_"+code,{});
-    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-    cur[stName].predictions[koKeyId]={h,a,pen:pen||"",locked:true};
-    cur[stName].savedAt=new Date().toISOString();
-    await dbSet("preds_"+code,cur);
-    setCompPreds({...cur});
+    try{
+      const cur=await dbGet("preds_"+code,{});
+      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+      cur[stName].predictions[koKeyId]={h,a,pen:pen||"",locked:true};
+      cur[stName].savedAt=new Date().toISOString();
+      await dbSet("preds_"+code,cur);
+      setCompPreds({...cur});
+    }catch(err){
+      alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
+    }
   }
   // Champion pick (stored as champion field on competitor record)
   async function saveChampion(team){
     const code=stComp;
-    const cur=await dbGet("preds_"+code,{});
-    if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-    cur[stName].champion={team,locked:true};
-    cur[stName].savedAt=new Date().toISOString();
-    await dbSet("preds_"+code,cur);
-    setCompPreds({...cur});
+    try{
+      const cur=await dbGet("preds_"+code,{});
+      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
+      cur[stName].champion={team,locked:true};
+      cur[stName].savedAt=new Date().toISOString();
+      await dbSet("preds_"+code,cur);
+      setCompPreds({...cur});
+    }catch(err){
+      alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
+    }
   }
 
   const myComp=comps[stComp];
