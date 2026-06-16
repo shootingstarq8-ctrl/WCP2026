@@ -1055,12 +1055,13 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
                         , SCHEDULE.map((m)=>{
                           const mk=m.key; const p=userPreds[mk]||{};
                           const hasPred=p&&p.h!=null&&p.h!=="";
+                          const isUnlocked=hasPred&&!p.locked; // reflects real DB state
                           return (
                             React.createElement('div', { key: mk, style: {display:"flex",flexDirection:"column",gap:6,padding:"8px 10px",background:"rgba(0,0,0,0.2)",borderRadius:7},}
                               , React.createElement(AdminPredEditor, { name: name, mk: mk, p: p, m: m, onSave: adminEditPrediction,})
                               , hasPred&&(
                                 React.createElement('div', { style: {display:"flex",justifyContent:"flex-end"},}
-                                  , unlockedNow[name+mk]
+                                  , isUnlocked
                                     ? React.createElement('span', { style: {fontSize:11,padding:"4px 12px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح للمنافس"  )
                                     : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"4px 10px"}, onClick: ()=>unlockPrediction(name,mk),}, "🔓 فتح للمنافس"  )
                                 )
