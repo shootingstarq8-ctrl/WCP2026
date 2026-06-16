@@ -92,6 +92,21 @@ async function dbSet(key,value){
   }
   lsSet(key,value);
 }
+// Write to a specific nested path: pathSegs is an array of raw keys under top-level `key`.
+// Only the targeted node is written — avoids whole-object races / phantom entries.
+async function dbSetPath(key,pathSegs,value){
+  if(FB_OK){
+    const encPath=pathSegs.map(encKey).join("/");
+    await FB_DB.ref("wc26/"+key+"/"+encPath).set(encodeKeys(value));
+    return;
+  }
+  // localStorage fallback: read-modify-write the whole object
+  const obj=lsGet(key,{})||{};
+  let node=obj;
+  for(let i=0;i<pathSegs.length-1;i++){const s=pathSegs[i];if(!node[s]||typeof node[s]!=="object")node[s]={};node=node[s];}
+  node[pathSegs[pathSegs.length-1]]=value;
+  lsSet(key,obj);
+}
 // Live subscription: calls cb(value) immediately and on every change.
 function dbSubscribe(key,fallback,cb){
   if(FB_OK){
@@ -857,23 +872,20 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
     const key="preds_"+activeComp;
     const cur=await dbGet(key,{});
     if(cur[studentName]&&cur[studentName].predictions&&cur[studentName].predictions[matchKey]){
-      cur[studentName].predictions[matchKey]={...cur[studentName].predictions[matchKey],locked:false};
-      await dbSet(key,cur);
+      const updated={...cur[studentName].predictions[matchKey],locked:false};
+      await dbSetPath(key,[studentName,"predictions",matchKey],updated);
       setUnlockedNow(prev=>({...prev,[studentName+matchKey]:true}));
       reloadComp(activeComp);
     }
   }
 
-  // Admin directly edits a competitor's prediction score (keeps it locked). Works after match lock/end.
+  // Admin directly edits/creates a competitor's prediction score (keeps it locked). Works after match lock/end.
   async function adminEditPrediction(studentName,matchKey,h,a){
     const key="preds_"+activeComp;
     const cur=await dbGet(key,{});
-    if(!cur[studentName])cur[studentName]={predictions:{},savedAt:new Date().toISOString()};
-    if(!cur[studentName].predictions)cur[studentName].predictions={};
-    const prev=cur[studentName].predictions[matchKey]||{};
-    cur[studentName].predictions[matchKey]={...prev,h,a,locked:true};
-    cur[studentName].savedAt=cur[studentName].savedAt||new Date().toISOString();
-    await dbSet(key,cur);
+    const prev=(cur[studentName]&&cur[studentName].predictions&&cur[studentName].predictions[matchKey])||{};
+    await dbSetPath(key,[studentName,"predictions",matchKey],{...prev,h,a,locked:true});
+    if(!cur[studentName]||!cur[studentName].savedAt)await dbSetPath(key,[studentName,"savedAt"],new Date().toISOString());
     reloadComp(activeComp);
   }
 
@@ -1255,12 +1267,9 @@ function App(){
   async function savePrediction(matchKey,h,a){
     const code=stComp;
     try{
-      const cur=await dbGet("preds_"+code,{});
-      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-      cur[stName].predictions[matchKey]={h,a,locked:true};
-      cur[stName].savedAt=new Date().toISOString();
-      await dbSet("preds_"+code,cur);
-      setCompPreds({...cur});
+      await dbSetPath("preds_"+code,[stName,"predictions",matchKey],{h,a,locked:true});
+      await dbSetPath("preds_"+code,[stName,"savedAt"],new Date().toISOString());
+      setCompPreds(prev=>{const n={...prev};if(!n[stName])n[stName]={predictions:{}};n[stName]={...n[stName],predictions:{...(n[stName].predictions||{}),[matchKey]:{h,a,locked:true}},savedAt:new Date().toISOString()};return n;});
     }catch(err){
       alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
     }
@@ -1270,12 +1279,10 @@ function App(){
   async function saveKoPrediction(koKeyId,h,a,pen){
     const code=stComp;
     try{
-      const cur=await dbGet("preds_"+code,{});
-      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-      cur[stName].predictions[koKeyId]={h,a,pen:pen||"",locked:true};
-      cur[stName].savedAt=new Date().toISOString();
-      await dbSet("preds_"+code,cur);
-      setCompPreds({...cur});
+      const val={h,a,pen:pen||"",locked:true};
+      await dbSetPath("preds_"+code,[stName,"predictions",koKeyId],val);
+      await dbSetPath("preds_"+code,[stName,"savedAt"],new Date().toISOString());
+      setCompPreds(prev=>{const n={...prev};if(!n[stName])n[stName]={predictions:{}};n[stName]={...n[stName],predictions:{...(n[stName].predictions||{}),[koKeyId]:val},savedAt:new Date().toISOString()};return n;});
     }catch(err){
       alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
     }
@@ -1284,12 +1291,10 @@ function App(){
   async function saveChampion(team){
     const code=stComp;
     try{
-      const cur=await dbGet("preds_"+code,{});
-      if(!cur[stName])cur[stName]={predictions:{},savedAt:new Date().toISOString()};
-      cur[stName].champion={team,locked:true};
-      cur[stName].savedAt=new Date().toISOString();
-      await dbSet("preds_"+code,cur);
-      setCompPreds({...cur});
+      const val={team,locked:true};
+      await dbSetPath("preds_"+code,[stName,"champion"],val);
+      await dbSetPath("preds_"+code,[stName,"savedAt"],new Date().toISOString());
+      setCompPreds(prev=>{const n={...prev};if(!n[stName])n[stName]={predictions:{}};n[stName]={...n[stName],champion:val,savedAt:new Date().toISOString()};return n;});
     }catch(err){
       alert("تعذّر حفظ التوقع على الخادم. تحقّق من الاتصال بالإنترنت وحاول مرة أخرى.\n\n"+(err&&err.message?err.message:""));
     }
