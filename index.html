@@ -529,7 +529,7 @@ function StatBar({label,list,total,color,emoji}){
   );
 }
 
-function StatsCard({matchKey,home,away,preds,actual}){
+function StatsCard({matchKey,home,away,preds,actual,date,kickoff}){
   const students=Object.keys(preds);
   const total=students.length;
   const homeWin=[],awayWin=[],draw=[],noPred=[];
@@ -544,7 +544,8 @@ function StatsCard({matchKey,home,away,preds,actual}){
   const ac=actual[matchKey];
   const hasAc=ac&&ac.h!=null&&ac.h!=="";
   const _sm=SCHEDULE.find(x=>x.key===matchKey);
-  const _when=_sm?`${_sm.kickoff} — ${fmtDate(_sm.date)}`:"";
+  const _d=date||(_sm&&_sm.date), _k=kickoff||(_sm&&_sm.kickoff);
+  const _when=(_d&&_k)?`${_k} — ${fmtDate(_d)}`:"";
   return (
     React.createElement('div', { style: {...S.matchCard,padding:20},}
       , _when&&React.createElement('div', { style: {fontSize:11,color:"#88aacc",marginBottom:8},}, "🕐 ", _when)
@@ -1550,7 +1551,27 @@ function App(){
           React.createElement('div', null
             , React.createElement('h2', { style: S.secTitle,}, "📊 إحصائيات "  , myComp?myComp.name:"")
             , !isLoggedIn?React.createElement('div', { style: S.empty,}, "سجّل الدخول لرؤية الإحصائيات"   ):!Object.keys(compPreds).length?React.createElement('div', { style: S.empty,}, "لا توجد توقعات بعد"   ):(
-              (()=>{
+              React.createElement('div', null
+              /* KNOCKOUT STATS */
+              , (!KO_ROUNDS.every(r=>!(koMatches[r.id]||[]).some(m=>m.home&&m.away)))&&(
+                React.createElement('div', { style: {marginBottom:28},}
+                  , React.createElement('div', { style: {fontSize:16,fontWeight:800,color:"#ffd700",marginBottom:14},}, "🏟️ الأدوار الإقصائية"  )
+                  , KO_ROUNDS.map(r=>{
+                    const ms=(koMatches[r.id]||[]).map((m,idx)=>({...m,idx})).filter(m=>m.home&&m.away);
+                    if(!ms.length)return null;
+                    return (
+                      React.createElement('div', { key: r.id, style: {marginBottom:20},}
+                        , React.createElement('h3', { style: {fontSize:15,fontWeight:700,color:"#00d4ff",marginBottom:10},}, r.name)
+                        , React.createElement('div', { style: S.grid,}, ms.map(m=>{
+                          const kk=koKey(r.id,m.idx);
+                          return React.createElement(StatsCard, { key: kk, matchKey: kk, home: m.home, away: m.away, preds: compPreds, actual: actual, date: m.date, kickoff: m.kickoff,});
+                        }))
+                      )
+                    );
+                  })
+                )
+              )
+              , (()=>{
                 const endedMatches=SCHEDULE.filter(m=>isMatchEnded(m.key));
                 const upcomingMatches=SCHEDULE.filter(m=>!isMatchEnded(m.key));
                 // group upcoming by date (keep existing date-block look)
@@ -1584,6 +1605,7 @@ function App(){
                   )
                 );
               })()
+              )
             )
           )
         )
