@@ -1014,6 +1014,25 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
     reloadComp(activeComp);
   }
 
+  // Admin unlock or set a competitor's champion pick
+  async function adminUnlockChampion(studentName){
+    const key="preds_"+activeComp;
+    const cur=await dbGet(key,{});
+    if(cur[studentName]&&cur[studentName].champion){
+      await dbSetPath(key,[studentName,"champion"],{...cur[studentName].champion,locked:false});
+      setUnlockedNow(prev=>({...prev,[studentName+"__champ"]:true}));
+      reloadComp(activeComp);
+    }
+  }
+  async function adminSetChampion(studentName,team){
+    const key="preds_"+activeComp;
+    const cur=await dbGet(key,{});
+    if(!cur[studentName]&&!team)return;
+    await dbSetPath(key,[studentName,"champion"],{team,locked:true});
+    if(!cur[studentName]||!cur[studentName].savedAt)await dbSetPath(key,[studentName,"savedAt"],new Date().toISOString());
+    reloadComp(activeComp);
+  }
+
   async function resetActualField(matchKey){
     const next={...(allData.actual||{})};
     delete next[matchKey];
@@ -1177,7 +1196,30 @@ function AdminPanel({comps,setComps,activeComp,setActiveComp,allData,reloadComp,
                         , React.createElement('span', { style: {fontSize:11,color:"#88aacc",background:"rgba(0,212,255,0.1)",borderRadius:6,padding:"2px 8px"},}, predCount, " توقع ▾"  )
                       )
                       , React.createElement('div', { style: {padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:6},}
-                        , SCHEDULE.map((m)=>{
+                        , (()=>{
+                          const champ=preds[name]&&preds[name].champion;
+                          const champTeam=champ&&champ.team;
+                          const champUnlocked=champ&&!champ.locked;
+                          const allTeams=new Set();
+                          KO_ROUNDS.forEach(r=>(koMatches[r.id]||[]).forEach(m=>{if(m.home)allTeams.add(m.home);if(m.away)allTeams.add(m.away);}));
+                          const teamList=Array.from(allTeams);
+                          return React.createElement('div', { style: {display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"rgba(255,215,0,0.06)",border:"1px solid rgba(255,215,0,0.2)",borderRadius:7,flexWrap:"wrap"},}
+                            , React.createElement('span', { style: {fontSize:12,fontWeight:700,color:"#ffd700"},}, "👑 حامل اللقب:"  )
+                            , React.createElement('span', { style: {flex:1,fontSize:12,color:"#ccd8f0",minWidth:80},}, champTeam?`${FLAGS[champTeam]||"🏳️"} ${champTeam}`:React.createElement('span', { style: {color:"#667",fontStyle:"italic"},}, "لم يختر" ))
+                            , teamList.length>0&&React.createElement('select', { value: champTeam||"", onChange: e=>adminSetChampion(name,e.target.value), style: {background:"rgba(0,0,0,0.3)",color:"#ffd700",border:"1px solid rgba(255,215,0,0.3)",borderRadius:6,padding:"4px 8px",fontSize:12},}
+                              , React.createElement('option', { value: "",}, "— اختر —"  )
+                              , teamList.map(t=>React.createElement('option', { key: t, value: t,}, t))
+                            )
+                            , champTeam&&(champUnlocked
+                              ? React.createElement('span', { style: {fontSize:11,padding:"4px 10px",borderRadius:8,background:"rgba(0,200,100,0.15)",border:"1px solid rgba(0,200,100,0.4)",color:"#00c864",fontWeight:700},}, "✅ مفتوح" )
+                              : React.createElement('button', { style: {...S.btn2,fontSize:11,padding:"4px 10px"}, onClick: ()=>adminUnlockChampion(name),}, "🔓 فتح" ))
+                          );
+                        })()
+                        , (()=>{
+                          const koList=[];
+                          KO_ROUNDS.forEach(r=>(koMatches[r.id]||[]).forEach((m,idx)=>{if(m.home&&m.away)koList.push({key:koKey(r.id,idx),home:m.home,away:m.away,date:m.date,kickoff:m.kickoff});}));
+                          return [...SCHEDULE,...koList];
+                        })().map((m)=>{
                           const mk=m.key; const p=userPreds[mk]||{};
                           const hasPred=p&&p.h!=null&&p.h!=="";
                           const isUnlocked=hasPred&&!p.locked; // reflects real DB state
@@ -1605,6 +1647,34 @@ function App(){
                   )
                 );
               })()
+              /* CHAMPION PREDICTIONS (always visible at bottom) */
+              , React.createElement('div', { style: {marginTop:30,...S.sec},}
+                , React.createElement('h3', { style: S.secHead,}, "👑 توقعات حامل اللقب"   )
+                , React.createElement('p', { style: {...S.note,color:"#ffd700"},}, "بونص 3 نقاط للتوقّع الصحيح"   )
+                , (()=>{
+                  const rows=Object.keys(compPreds).map(name=>{
+                    const t=_optionalChain([compPreds, 'access', _z1 => _z1[name], 'optionalAccess', _z2 => _z2.champion, 'optionalAccess', _z3 => _z3.team]);
+                    return {name,team:t};
+                  }).filter(r=>r.team);
+                  if(!rows.length)return React.createElement('div', { style: S.empty,}, "لا توجد توقعات لحامل اللقب بعد"     );
+                  // group by team
+                  const byTeam={};rows.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r.name);});
+                  const teams=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
+                  return React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:8},}
+                    , teams.map(team=>(
+                      React.createElement('div', { key: team, style: {background:championActual&&team===championActual?"rgba(0,200,100,0.1)":"rgba(0,0,0,0.2)",border:championActual&&team===championActual?"1px solid rgba(0,200,100,0.4)":"1px solid rgba(255,255,255,0.06)",borderRadius:9,padding:"10px 12px"},}
+                        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:8,marginBottom:6},}
+                          , React.createElement('span', { style: {fontSize:18},}, FLAGS[team]||"🏳️")
+                          , React.createElement('span', { style: {fontWeight:700,fontSize:14,color:"#fff"},}, team)
+                          , championActual&&team===championActual&&React.createElement('span', { style: {fontSize:11,color:"#00c864",fontWeight:700},}, "✅ البطل")
+                          , React.createElement('span', { style: {marginInlineStart:"auto",fontSize:12,color:"#88aacc",background:"rgba(0,212,255,0.1)",borderRadius:6,padding:"2px 10px"},}, byTeam[team].length, " متنافس"  )
+                        )
+                        , React.createElement('div', { style: {fontSize:12,color:"#ccd8f0",lineHeight:1.7},}, byTeam[team].join("، "))
+                      )
+                    ))
+                  );
+                })()
+              )
               )
             )
           )
