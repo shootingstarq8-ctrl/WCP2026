@@ -533,14 +533,16 @@ function StatsCard({matchKey,home,away,preds,actual,date,kickoff}){
   const students=Object.keys(preds);
   const total=students.length;
   const homeWin=[],awayWin=[],draw=[],noPred=[];
+  const penHome=[],penAway=[]; // for draw predictions with a shootout pick (KO only)
   students.forEach(name=>{
     const p=_optionalChain([preds, 'access', _7 => _7[name], 'optionalAccess', _8 => _8.predictions, 'optionalAccess', _9 => _9[matchKey]]);
     if(!p||p.h==null||p.h===""){noPred.push(name);return;}
     const w=getWinner(p);
     if(w==="home")homeWin.push({name,score:`${p.h}-${p.a}`});
     else if(w==="away")awayWin.push({name,score:`${p.h}-${p.a}`});
-    else draw.push({name,score:`${p.h}-${p.a}`});
+    else {draw.push({name,score:`${p.h}-${p.a}`}); if(p.pen===home)penHome.push(name); else if(p.pen===away)penAway.push(name);}
   });
+  const isKo=String(matchKey).indexOf("KO_")===0;
   const ac=actual[matchKey];
   const hasAc=ac&&ac.h!=null&&ac.h!=="";
   const _sm=SCHEDULE.find(x=>x.key===matchKey);
@@ -561,6 +563,16 @@ function StatsCard({matchKey,home,away,preds,actual,date,kickoff}){
       )
       , React.createElement(StatBar, { label: home, list: homeWin, total: total, color: "rgba(0,180,255,0.7)", emoji: "🔵",})
       , React.createElement(StatBar, { label: "تعادل", list: draw, total: total, color: "rgba(180,180,180,0.6)", emoji: "🟡",})
+      , isKo&&(penHome.length>0||penAway.length>0)&&(
+        React.createElement('div', { style: {marginTop:8,padding:"8px 10px",background:"rgba(255,215,0,0.06)",border:"1px solid rgba(255,215,0,0.2)",borderRadius:8},}
+          , React.createElement('div', { style: {fontSize:11,fontWeight:700,color:"#ffd700",marginBottom:5},}, "⚽ توقّع الفائز بالترجيح (لمن توقّع تعادلاً):"       )
+          , React.createElement('div', { style: {fontSize:11,color:"#ccd8f0",lineHeight:1.7},}
+            , penHome.length>0&&React.createElement('div', null, `${FLAGS[home]||"🏳️"} ${home}: `, React.createElement('span', { style: {color:"#ffd700",fontWeight:700},}, penHome.length), penHome.length<=8?` (${penHome.join("، ")})`:"")
+            , penAway.length>0&&React.createElement('div', null, `${FLAGS[away]||"🏳️"} ${away}: `, React.createElement('span', { style: {color:"#ffd700",fontWeight:700},}, penAway.length), penAway.length<=8?` (${penAway.join("، ")})`:"")
+          )
+          , hasAc&&ac.pen&&React.createElement('div', { style: {fontSize:11,color:"#00c864",marginTop:5,fontWeight:700},}, `✅ الفائز الفعلي بالترجيح: ${ac.pen}`)
+        )
+      )
       , React.createElement(StatBar, { label: away, list: awayWin, total: total, color: "rgba(255,100,100,0.7)", emoji: "🔴",})
       , noPred.length>0&&React.createElement('div', { style: {fontSize:11,color:"#445566",marginTop:4},}, "بدون توقع: "  , noPred.join("، "))
       , React.createElement('div', { style: {fontSize:10,color:"#2a3a4a",marginTop:6},}, "اضغط الشريط لرؤية الأسماء"   )
@@ -672,18 +684,25 @@ function AdminMatchCard({matchKey,home,away,actual,onSave,onReset,allowPen}){
   );
 }
 
-function LbRow({s,i,isMe,preds,actual}){
+function LbRow({s,i,isMe,preds,actual,koMatches}){
   const [open,setOpen]=useState(false);
   let exact=0,winner=0,wrong=0;
   const rows=[];
   const predObj=_optionalChain([preds, 'access', _10 => _10[s.name], 'optionalAccess', _11 => _11.predictions])||{};
+  function teamsFor(k){
+    const sm=SCHEDULE.find(x=>x.key===k);
+    if(sm)return {home:sm.home,away:sm.away};
+    // knockout key format: KO_<round>_<idx>
+    const m=String(k).match(/^KO_(\w+?)_(\d+)$/);
+    if(m&&koMatches&&koMatches[m[1]]&&koMatches[m[1]][+m[2]]){const km=koMatches[m[1]][+m[2]];return {home:km.home||"",away:km.away||""};}
+    return {home:"",away:""};
+  }
   Object.keys(actual).forEach(k=>{
     const p=predObj[k],ac=actual[k];
     if(!p||p.h==null||p.h==="")return;
     if(!ac||ac.h==null||ac.h==="")return;
     const r=predResult(p,ac);
-    const sm=SCHEDULE.find(x=>x.key===k);
-    const home=sm?sm.home:"",away=sm?sm.away:"";
+    const {home,away}=teamsFor(k);
     if(r==="exact")exact++;else if(r==="winner")winner++;else if(r==="wrong")wrong++;
     rows.push({home,away,ph:p.h,pa:p.a,ah:ac.h,aa:ac.a,r});
   });
@@ -735,10 +754,18 @@ function LbRow({s,i,isMe,preds,actual}){
 }
 
 // Knockout prediction card (competitor side) — same scoring, per-match save+lock
-function KoPredictCard({koKeyId,home,away,date,kickoff,pred,onSave}){
+function KoPredictCard({koKeyId,home,away,date,kickoff,pred,onSave,actualRes}){
   const saved=pred&&pred.locked;
   const started=koMatchStarted({date,kickoff});
   const editable=!saved&&!started;
+  const ended=actualRes&&actualRes.h!=null&&actualRes.h!=="";
+  // Result of the KO prediction (incl. penalty bonus indicator)
+  let koRes=null, koPenBonus=false;
+  if(ended&&pred&&pred.h!=null&&pred.h!==""){
+    koRes=predResult({h:pred.h,a:pred.a},actualRes);
+    const pDraw=parseInt(norm(pred.h))===parseInt(norm(pred.a));
+    if(pDraw&&actualRes.pen&&pred.pen&&pred.pen===actualRes.pen)koPenBonus=true;
+  }
   const [h,setH]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _12 => _12.h]), () => ("")));
   const [a,setA]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _13 => _13.a]), () => ("")));
   const [pen,setPen]=useState(_nullishCoalesce(_optionalChain([pred, 'optionalAccess', _14 => _14.pen]), () => ("")));
@@ -782,8 +809,16 @@ function KoPredictCard({koKeyId,home,away,date,kickoff,pred,onSave}){
           )
         )
       )
-      , saved&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#00c864"},}, "✅ تم حفظ توقعك"   , saved&&pred.pen?` — الترجيح: ${pred.pen}`:"")
-      , !saved&&started&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#ffaa55"},}, "انتهى وقت التوقع"  )
+      , ended&&(
+        React.createElement('div', { style: {marginTop:9,display:"flex",flexDirection:"column",gap:6},}
+          , React.createElement('div', { style: {textAlign:"center",fontSize:11,fontWeight:700,background:"rgba(120,120,140,0.15)",border:"1px solid rgba(150,150,170,0.3)",color:"#aab4c8",borderRadius:6,padding:"3px 8px"},}, "🏁 انتهت المباراة — النتيجة "     , actualRes.h, "—", actualRes.a, actualRes.pen?` (ترجيح: ${actualRes.pen})`:"")
+          , koRes&&React.createElement('div', { style: {textAlign:"center",fontSize:12,fontWeight:700,borderRadius:6,padding:"4px 10px",...(koRes==="exact"?{background:"rgba(0,200,100,0.15)",color:"#00c864"}:koRes==="winner"?{background:"rgba(255,200,0,0.15)",color:"#ffd700"}:{background:"rgba(255,60,60,0.12)",color:"#ff6060"})},}, koRes==="exact"?"🎯 توقعك: نتيجة صحيحة (+3)":koRes==="winner"?"✅ توقعك: فائز صحيح (+1)":"❌ توقعك: خاطئ (0)")
+          , koPenBonus&&React.createElement('div', { style: {textAlign:"center",fontSize:11,fontWeight:700,background:"rgba(255,215,0,0.15)",color:"#ffd700",borderRadius:6,padding:"3px 8px"},}, "⚽ + بونص الترجيح الصحيح (+3)"    )
+          , !koRes&&React.createElement('div', { style: {textAlign:"center",fontSize:11,color:"#556680"},}, "لم تتوقّع هذه المباراة"   )
+        )
+      )
+      , saved&&!ended&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#00c864"},}, "✅ تم حفظ توقعك"   , saved&&pred.pen?` — الترجيح: ${pred.pen}`:"")
+      , !saved&&started&&!ended&&React.createElement('div', { style: {marginTop:9,textAlign:"center",fontSize:11,color:"#ffaa55"},}, "انتهى وقت التوقع"  )
       , editable&&!confirming&&React.createElement('button', { style: {...S.saveBtn,width:"100%",marginTop:10,justifyContent:"center",...(canSave?{}:{opacity:0.5})}, disabled: !canSave, onClick: ()=>canSave&&setConfirming(true),}, "💾 حفظ هذا التوقع"   )
       , editable&&!canSave&&React.createElement('div', { style: {fontSize:10,color:"#ffaa55",textAlign:"center",marginTop:6},}, "اختر الفائز بالترجيح أولاً"   )
       , editable&&confirming&&(
@@ -1542,7 +1577,7 @@ function App(){
                         , React.createElement('div', { style: S.grid,}
                           , ms.map(m=>{
                             const kk=koKey(r.id,m.idx);
-                            return React.createElement(KoPredictCard, { key: kk, koKeyId: kk, home: m.home, away: m.away, date: m.date, kickoff: m.kickoff, pred: myPreds[kk], onSave: saveKoPrediction,});
+                            return React.createElement(KoPredictCard, { key: kk, koKeyId: kk, home: m.home, away: m.away, date: m.date, kickoff: m.kickoff, pred: myPreds[kk], actualRes: actual[kk], onSave: saveKoPrediction,});
                           })
                         )
                       )
@@ -1581,7 +1616,7 @@ function App(){
             , !isLoggedIn?React.createElement('div', { style: S.empty,}, "سجّل الدخول لرؤية ترتيب مسابقتك"    ):!leaderboard.length?React.createElement('div', { style: S.empty,}, "لا توجد توقعات بعد"   ):(
               React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:10},}
                 , leaderboard.map((s,i)=>(
-                  React.createElement(LbRow, { key: s.name, s: s, i: i, isMe: s.name===stName, preds: compPreds, actual: actual,})
+                  React.createElement(LbRow, { key: s.name, s: s, i: i, isMe: s.name===stName, preds: compPreds, actual: actual, koMatches: koMatches,})
                 ))
               )
             )
